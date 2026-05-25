@@ -1,0 +1,140 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>FUTA Online Class</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link href="https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,500;0,700;0,900;1,700&family=Lora:ital,wght@0,400;0,500;0,600;1,400&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet" />
+<link rel="stylesheet" href="style.css" />
+  <!-- Google tag (gtag.js) -->
+ <script async src="https://www.googletagmanager.com/gtag/js?id=G-KSL0CRY8WX"></script>
+ <script>
+   window.dataLayer = window.dataLayer || [];
+   function gtag(){dataLayer.push(arguments);}
+   gtag('js', new Date());
+
+   gtag('config', 'G-KSL0CRY8WX');
+ </script>
+</head>
+<body>
+
+<!-- NAVIGATION -->
+<nav>
+  <div class="nav-crest" onclick="navigate('home')">FU</div>
+  <div class="nav-logo" onclick="navigate('home')">FUTA <span>Online Class</span></div>
+  <div class="nav-divider"></div>
+  <div class="nav-breadcrumb" id="breadcrumb"></div>
+</nav>
+
+<!-- PAGE: HOME -->
+<div class="page active" id="page-home">
+  <div class="hero">
+    <div class="hero-ornament"></div>
+    <div class="hero-badge">Federal University of Technology, Akure</div>
+    <h1>Study Smarter<span class="line2">at FUTA</span></h1>
+    <div class="hero-rule"></div>
+    <p>Your official academic companion. Access course summaries, practice CBT questions, and study materials — all in one place.</p>
+    <div class="hero-stats" id="hero-stats"></div>
+  </div>
+  <div class="container">
+    <div class="section-head">
+      <div class="section-title">Select Your Level</div>
+      <div class="section-rule"></div>
+    </div>
+    <p class="section-sub">Choose an academic level to browse semesters, courses, and study materials.</p>
+    <div class="level-grid" id="level-grid"></div>
+  </div>
+</div>
+
+<!-- PAGE: LEVEL (courses by semester) -->
+<div class="page" id="page-level">
+  <div class="page-header">
+    <button class="back-btn" onclick="navigate('home')">← All Levels</button>
+    <div class="page-header-tag" id="level-tag"></div>
+    <h2 id="level-title"></h2>
+    <p id="level-desc"></p>
+    <div class="page-header-rule"></div>
+  </div>
+  <div class="container">
+    <div id="course-content"></div>
+  </div>
+</div>
+
+<!-- PAGE: COURSE (chapters) -->
+<div class="page" id="page-course">
+  <div class="page-header">
+    <button class="back-btn" id="course-back-btn">← Back to Courses</button>
+    <div class="page-header-tag" id="course-tag"></div>
+    <h2 id="course-title"></h2>
+    <p id="course-desc"></p>
+    <div class="page-header-rule"></div>
+  </div>
+  <div class="container">
+    <div id="chapter-content"></div>
+  </div>
+</div>
+
+<!-- CBT MODAL -->
+<div class="modal-overlay" id="cbt-modal">
+  <div class="modal">
+    <button class="modal-close" onclick="closeCBT()">✕</button>
+    <div class="modal-header">
+      <div class="modal-title" id="cbt-modal-title">CBT Practice</div>
+      <div class="modal-subtitle" id="cbt-modal-sub"></div>
+    </div>
+    <div id="cbt-body"></div>
+  </div>
+</div>
+
+<!-- FOOTER -->
+<footer class="site-footer">
+  <div class="footer-rule"></div>
+  <div class="footer-logo">FUTA <span>Online Class</span></div>
+  <div class="footer-tagline">Read · Revise · Ace — Built for FUTA Students</div>
+  <div class="footer-credit">Created by <strong>Oluwatosin Odejinmi</strong> &nbsp;·&nbsp;</div>
+</footer>
+
+<!-- ============================================================
+  COURSE DATA FILES — load each course's chapter data
+  Add new course files here as you create them
+============================================================ -->
+<!-- 1. Registry FIRST — defines PORTAL_INJECT -->
+<script src="registry.js"></script>
+
+<!-- 2. Course files SECOND — call PORTAL_INJECT -->
+<script src="courses/mts101.js"></script>
+<script src="courses/ent301.js"></script>
+<script src="courses/bio102.js"></script>
+<script src="courses/mee102.js"></script>
+<script src="courses/che102.js"></script>
+<script src="courses/phy102.js"></script>
+  <script src="courses/gns102.js"></script>
+  <script src="courses/gns106.js"></script>
+  <script src="courses/phy108.js"></script>
+  <script src="courses/che104.js"></script>
+  <script src="courses/bio104.js"></script>
+  <script src="courses/bio104.js"></script>
+  <script src="courses/mts102.js"></script>
+  <script src="courses/mts104.js"></script>
+  <script src="courses/csc102.js"></script>
+  <script src="courses/eee102.js"></script>
+  
+<!-- 3. Data THIRD — reads _COURSE_REGISTRY -->
+<script src="data.js"></script>
+
+<!-- 4. App LAST — renders everything -->
+<script src="app.js"></script>
+
+<script>
+  console.log("Registry:", _COURSE_REGISTRY);
+  console.log("MTS 101 chapters:", _COURSE_REGISTRY["MTS 101"]);
+  
+  const lvl = PORTAL_DATA.levels.find(l => l.id === "100");
+  const sem = lvl.semesters.find(s => s.id === "1st");
+  const course = sem.courses.find(c => c.code === "MTS 101");
+  console.log("Course chapters after inject:", course.chapters.length);
+</script>
+
+</body>
+</html>
