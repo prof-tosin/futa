@@ -340,11 +340,11 @@ PORTAL_INJECT("EEE 102", [
         correct: 1,
         explanation: "Proteus Design Suite supports schematic capture, simulation, and PCB layout design — the PCB layout capability is a key differentiator."
       },
-      {
-        text: "What are the MATLAB command prompts for the full and educational versions respectively?",
-        options: [">>" and "EDU>", "MATLAB>" and "STUDENT>", ">> and <<", "CMD> and EDU>"],
-        correct: 0,
-        explanation: "The MATLAB prompt is >> for the full version and EDU> for the educational version."
+     {
+       text: "What are the MATLAB command prompts for the full and educational versions respectively?",
+       options: [">> and EDU>", "MATLAB> and STUDENT>", ">> and <<", "CMD> and EDU>"],
+       correct: 0,
+       explanation: "The MATLAB prompt is >> for the full version and EDU> for the educational version."
       },
       {
         text: "The development of MATLAB gained popularity initially through:",
@@ -847,7 +847,7 @@ PORTAL_INJECT("EEE 102", [
       }
     ]
   },
-
+  
   /* ============================================================
      CHAPTER 3 — MATLAB Mathematical Functions & Plotting
   ============================================================ */
