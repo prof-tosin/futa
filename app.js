@@ -213,7 +213,8 @@ function renderCourse(levelId, courseCode) {
           </div>` : ''}
         <div class="ch-actions">
           ${ch.pdfUrl ? `<a class="btn btn-secondary" href="${ch.pdfUrl}" target="_blank" rel="noopener">📄 Read PDF</a>` : ''}
-          ${(ch.questions && ch.questions.length) ? `<button class="btn btn-primary" onclick="startCBT('${escQ(courseCode)}','${escQ(levelId)}',${idx})">🎯 Practice CBT</button>` : ''}
+          ${(ch.questions && ch.questions.length) ? `<button class="btn btn-primary" onclick="startCBT('${escQ(courseCode)}','${escQ(levelId)}',${idx}, false)">🎯 Practice CBT</button>` : ''}
+          ${(ch.questions && ch.questions.length) ? `<button class="btn btn-test" onclick="startCBT('${escQ(courseCode)}','${escQ(levelId)}',${idx}, true)">📝 Take Test</button>` : ''}
           ${ch.cbtUrl ? `<a class="btn btn-ghost" href="${ch.cbtUrl}" target="_blank" rel="noopener">🔗 External CBT</a>` : ''}
         </div>
       </div>
@@ -228,7 +229,7 @@ function toggleChapter(idx) {
 /* ─────────────────────────────────────────────────────────────────
    CBT ENGINE
 ───────────────────────────────────────────────────────────────── */
-function startCBT(courseCode, levelId, chapterIdx) {
+function startCBT(courseCode, levelId, chapterIdx, isTest = false) {
   const lvl = PORTAL_DATA.levels.find(l => l.id === levelId);
   let chapter = null;
   lvl?.semesters.forEach(s => {
@@ -239,9 +240,28 @@ function startCBT(courseCode, levelId, chapterIdx) {
 
   const limit = chapter.questionLimit || chapter.questions.length;
   const questions = shuffle([...chapter.questions]).slice(0, limit);
-  cbtState = { questions, current: 0, score: 0, answered: false, timeLimit: (chapter.timeLimit || 0) * 60 };
-  document.getElementById('cbt-modal-title').textContent = `Chapter ${chapter.number} — CBT Practice`;
-  document.getElementById('cbt-modal-sub').textContent = chapter.title;
+
+  // For test mode: force a time limit (default 1 min/question if none set)
+  let timeLimitSecs = (chapter.timeLimit || 0) * 60;
+  if (isTest && timeLimitSecs === 0) timeLimitSecs = questions.length * 60;
+
+  cbtState = {
+    questions,
+    current: 0,
+    score: 0,
+    answered: false,
+    isTest,
+    userAnswers: new Array(questions.length).fill(null), // track answers for review
+    timeLimit: isTest ? timeLimitSecs : 0
+  };
+
+  if (isTest) {
+    document.getElementById('cbt-modal-title').textContent = `Chapter ${chapter.number} — Test`;
+    document.getElementById('cbt-modal-sub').textContent = chapter.title + ' · Timed Test';
+  } else {
+    document.getElementById('cbt-modal-title').textContent = `Chapter ${chapter.number} — CBT Practice`;
+    document.getElementById('cbt-modal-sub').textContent = chapter.title;
+  }
   document.getElementById('cbt-modal').classList.add('open');
   renderCBTQuestion();
   clearInterval(cbtTimer);
@@ -353,17 +373,25 @@ function answerMCQ(chosen) {
   const isCorrect = chosen === correct;
   if (isCorrect) cbtState.score++;
 
-  document.querySelectorAll('.cbt-option').forEach((btn, i) => {
-    btn.disabled = true;
-    if (i === correct) btn.classList.add(isCorrect ? 'selected-correct' : 'reveal-correct');
-    if (i === chosen && !isCorrect) btn.classList.add('selected-wrong');
-  });
+  // Track user's answer for test review
+  cbtState.userAnswers[cbtState.current] = { type: 'mcq', chosen, correct, isCorrect };
 
-  showFeedback(isCorrect,
-    isCorrect
-      ? `✅ Correct! ${q.explanation || ''}`
-      : `❌ Incorrect. Correct answer: <strong>${String.fromCharCode(65+correct)}. ${q.options[correct]}</strong>. ${q.explanation || ''}`
-  );
+  if (cbtState.isTest) {
+    // In test mode: just disable options, no highlighting, no feedback
+    document.querySelectorAll('.cbt-option').forEach(btn => { btn.disabled = true; });
+    document.getElementById('cbt-next-btn').style.display = 'inline-flex';
+  } else {
+    document.querySelectorAll('.cbt-option').forEach((btn, i) => {
+      btn.disabled = true;
+      if (i === correct) btn.classList.add(isCorrect ? 'selected-correct' : 'reveal-correct');
+      if (i === chosen && !isCorrect) btn.classList.add('selected-wrong');
+    });
+    showFeedback(isCorrect,
+      isCorrect
+        ? `✅ Correct! ${q.explanation || ''}`
+        : `❌ Incorrect. Correct answer: <strong>${String.fromCharCode(65+correct)}. ${q.options[correct]}</strong>. ${q.explanation || ''}`
+    );
+  }
 }
 
 /* True / False */
@@ -375,22 +403,28 @@ function answerTF(chosenBool) {
   const isCorrect = chosenBool === correctBool;
   if (isCorrect) cbtState.score++;
 
+  // Track answer for test review
+  cbtState.userAnswers[cbtState.current] = { type: 'tf', chosen: chosenBool, correct: correctBool, isCorrect };
+
   /* Highlight buttons: opt-0 = True, opt-1 = False */
   const trueBtn  = document.getElementById('opt-0');
   const falseBtn = document.getElementById('opt-1');
   [trueBtn, falseBtn].forEach(b => b && (b.disabled = true));
 
-  const correctBtn = correctBool ? trueBtn : falseBtn;
-  const chosenBtn  = chosenBool  ? trueBtn : falseBtn;
-
-  if (correctBtn) correctBtn.classList.add(isCorrect ? 'selected-correct' : 'reveal-correct');
-  if (!isCorrect && chosenBtn) chosenBtn.classList.add('selected-wrong');
-
-  showFeedback(isCorrect,
-    isCorrect
-      ? `✅ Correct! ${q.explanation || ''}`
-      : `❌ Incorrect. The correct answer is <strong>${correctBool ? 'True' : 'False'}</strong>. ${q.explanation || ''}`
-  );
+  if (cbtState.isTest) {
+    // In test mode: just disable, no highlighting, no feedback
+    document.getElementById('cbt-next-btn').style.display = 'inline-flex';
+  } else {
+    const correctBtn = correctBool ? trueBtn : falseBtn;
+    const chosenBtn  = chosenBool  ? trueBtn : falseBtn;
+    if (correctBtn) correctBtn.classList.add(isCorrect ? 'selected-correct' : 'reveal-correct');
+    if (!isCorrect && chosenBtn) chosenBtn.classList.add('selected-wrong');
+    showFeedback(isCorrect,
+      isCorrect
+        ? `✅ Correct! ${q.explanation || ''}`
+        : `❌ Incorrect. The correct answer is <strong>${correctBool ? 'True' : 'False'}</strong>. ${q.explanation || ''}`
+    );
+  }
 }
 
 /* Fill-in-the-blank */
@@ -418,16 +452,24 @@ function submitFITB() {
   const isCorrect = accepted.includes(userAnswer.toLowerCase());
   if (isCorrect) cbtState.score++;
 
+  // Track answer for test review
+  cbtState.userAnswers[cbtState.current] = { type: 'fitb', chosen: userAnswer, correct: q.answer, isCorrect };
+
   inp.disabled = true;
-  inp.classList.add(isCorrect ? 'fitb-correct' : 'fitb-wrong');
   const btn = document.querySelector('.cbt-fitb-btn');
   if (btn) btn.disabled = true;
 
-  showFeedback(isCorrect,
-    isCorrect
-      ? `✅ Correct! ${q.explanation || ''}`
-      : `❌ Incorrect. The correct answer is: <strong>${q.answer}</strong>. ${q.explanation || ''}`
-  );
+  if (cbtState.isTest) {
+    // In test mode: no colour highlighting, no feedback
+    document.getElementById('cbt-next-btn').style.display = 'inline-flex';
+  } else {
+    inp.classList.add(isCorrect ? 'fitb-correct' : 'fitb-wrong');
+    showFeedback(isCorrect,
+      isCorrect
+        ? `✅ Correct! ${q.explanation || ''}`
+        : `❌ Incorrect. The correct answer is: <strong>${q.answer}</strong>. ${q.explanation || ''}`
+    );
+  }
 }
 
 /* Shared feedback display */
@@ -449,13 +491,17 @@ function nextCBTQuestion() {
 
 function showCBTResults(timeExpired = false) {
   clearInterval(cbtTimer);
-  const { score, questions } = cbtState;
+  const { score, questions, isTest, userAnswers } = cbtState;
   const total = questions.length;
   const pct = Math.round(score / total * 100);
   const grade = pct >= 70 ? '🏆 Distinction!' : pct >= 50 ? '👍 Good Effort!' : '📚 Keep Studying!';
 
   const timeMsg = timeExpired
-    ? `<div style="color:#c0392b;font-size:0.8rem;margin-bottom:12px;font-family:'Lora',serif;font-style:italic;">⏰ Time expired — quiz submitted automatically.</div>`
+    ? `<div style="color:#c0392b;font-size:0.8rem;margin-bottom:12px;font-family:'Lora',serif;font-style:italic;">⏰ Time expired — test submitted automatically.</div>`
+    : '';
+
+  const reviewBtn = isTest
+    ? `<button class="btn btn-secondary" onclick="showTestReview()" style="margin-top:8px;width:100%;justify-content:center;">📋 Review Test</button>`
     : '';
 
   document.getElementById('cbt-body').innerHTML = `
@@ -470,8 +516,82 @@ function showCBTResults(timeExpired = false) {
         <button class="btn btn-primary" onclick="restartCBT()">🔄 Try Again</button>
         <button class="btn btn-ghost" onclick="closeCBT()">Close</button>
       </div>
+      ${reviewBtn}
     </div>
   `;
+}
+
+function showTestReview() {
+  const { questions, userAnswers } = cbtState;
+  let html = `<div class="test-review">
+    <div class="test-review-header">
+      <span style="font-family:'Playfair Display',serif;font-size:1.1rem;font-weight:700;color:var(--text);">Test Review</span>
+      <span style="font-size:0.75rem;color:var(--text-muted);font-family:'Lora',serif;font-style:italic;">All questions, your answers & explanations</span>
+    </div>`;
+
+  questions.forEach((q, idx) => {
+    const ua = userAnswers[idx];
+    const qtype = q.type || 'mcq';
+    const isCorrect = ua ? ua.isCorrect : false;
+    const statusIcon = ua ? (isCorrect ? '✅' : '❌') : '⬜';
+    const statusClass = ua ? (isCorrect ? 'review-correct' : 'review-wrong') : 'review-skipped';
+
+    let answerLine = '';
+    if (!ua) {
+      answerLine = `<div class="review-answer-row"><span class="review-label">Not answered</span></div>`;
+    } else if (qtype === 'mcq') {
+      const chosenLabel = `${String.fromCharCode(65 + ua.chosen)}. ${q.options[ua.chosen]}`;
+      const correctLabel = `${String.fromCharCode(65 + ua.correct)}. ${q.options[ua.correct]}`;
+      answerLine = `
+        <div class="review-answer-row">
+          <span class="review-label">Your answer:</span>
+          <span class="${isCorrect ? 'review-val-correct' : 'review-val-wrong'}">${chosenLabel}</span>
+        </div>
+        ${!isCorrect ? `<div class="review-answer-row">
+          <span class="review-label">Correct answer:</span>
+          <span class="review-val-correct">${correctLabel}</span>
+        </div>` : ''}`;
+    } else if (qtype === 'tf') {
+      answerLine = `
+        <div class="review-answer-row">
+          <span class="review-label">Your answer:</span>
+          <span class="${isCorrect ? 'review-val-correct' : 'review-val-wrong'}">${ua.chosen ? 'True' : 'False'}</span>
+        </div>
+        ${!isCorrect ? `<div class="review-answer-row">
+          <span class="review-label">Correct answer:</span>
+          <span class="review-val-correct">${ua.correct ? 'True' : 'False'}</span>
+        </div>` : ''}`;
+    } else if (qtype === 'fitb') {
+      answerLine = `
+        <div class="review-answer-row">
+          <span class="review-label">Your answer:</span>
+          <span class="${isCorrect ? 'review-val-correct' : 'review-val-wrong'}">${ua.chosen}</span>
+        </div>
+        ${!isCorrect ? `<div class="review-answer-row">
+          <span class="review-label">Correct answer:</span>
+          <span class="review-val-correct">${ua.correct}</span>
+        </div>` : ''}`;
+    }
+
+    html += `
+      <div class="review-item ${statusClass}">
+        <div class="review-q-header">
+          <span class="review-q-num">${statusIcon} Q${idx + 1}</span>
+          <span class="review-q-text">${q.text}</span>
+        </div>
+        ${answerLine}
+        ${q.explanation ? `<div class="review-explanation"><span class="review-label">Explanation:</span> ${q.explanation}</div>` : ''}
+      </div>`;
+  });
+
+  html += `
+    <div style="margin-top:20px;display:flex;gap:10px;justify-content:center;flex-wrap:wrap">
+      <button class="btn btn-primary" onclick="restartCBT()">🔄 Try Again</button>
+      <button class="btn btn-ghost" onclick="closeCBT()">Close</button>
+    </div>
+  </div>`;
+
+  document.getElementById('cbt-body').innerHTML = html;
 }
 
 function restartCBT() {
@@ -480,6 +600,7 @@ function restartCBT() {
   cbtState.score = 0;
   cbtState.secondsLeft = cbtState.timeLimit;
   cbtState.questions = shuffle([...cbtState.questions]);
+  cbtState.userAnswers = new Array(cbtState.questions.length).fill(null);
   renderCBTQuestion();
   if (cbtState.timeLimit > 0) startCBTTimer();
 }
@@ -534,10 +655,10 @@ function updateTimerDisplay() {
 }
 
 /* ─────────────────────────────────────────────────────────────────
-   MODAL BACKDROP CLOSE
+   MODAL BACKDROP — clicking outside does NOT close (use X button only)
 ───────────────────────────────────────────────────────────────── */
 document.getElementById('cbt-modal').addEventListener('click', function(e) {
-  if (e.target === this) closeCBT();
+  // Intentionally no action — modal can only be closed via the X button
 });
 
 /* ─────────────────────────────────────────────────────────────────
