@@ -1071,3 +1071,201 @@ nav {
   opacity: 0.5;
   pointer-events: none;
 }
+
+/* ─────────────────────────────────────────────────────────────────
+   TRUE/FALSE & FILL-IN-THE-BLANK STYLES
+───────────────────────────────────────────────────────────────── */
+
+/* Fill-in-the-blank wrapper */
+.cbt-fitb-wrap {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin-bottom: 22px;
+}
+
+/* Text input */
+.cbt-fitb-input {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 14px 16px;
+  font-family: 'JetBrains Mono', 'Courier New', monospace;
+  font-size: 1rem;
+  background: rgba(255,255,255,0.04);
+  border: 1.5px solid rgba(201,146,26,0.3);
+  border-radius: 8px;
+  color: var(--text);
+  outline: none;
+  transition: border-color 0.2s, box-shadow 0.2s, background 0.2s;
+}
+
+.cbt-fitb-input:focus {
+  border-color: var(--gold);
+  box-shadow: 0 0 0 3px rgba(201,146,26,0.12);
+}
+
+.cbt-fitb-input::placeholder {
+  color: rgba(255,255,255,0.25);
+  font-style: italic;
+}
+
+.cbt-fitb-input:disabled {
+  pointer-events: none;
+  opacity: 0.85;
+}
+
+/* Correct answer styling */
+.cbt-fitb-input.fitb-correct {
+  border-color: var(--teal);
+  background: rgba(42,157,143,0.08);
+  color: var(--teal);
+}
+
+/* Wrong answer styling */
+.cbt-fitb-input.fitb-wrong {
+  border-color: var(--crimson);
+  background: rgba(192,57,43,0.08);
+  color: #e67e73;
+}
+
+/* Shake when submitted empty */
+.cbt-fitb-input.fitb-shake {
+  animation: fitb-shake 0.5s ease;
+  border-color: var(--crimson) !important;
+}
+
+@keyframes fitb-shake {
+  0%,100% { transform: translateX(0); }
+  20%      { transform: translateX(-8px); }
+  40%      { transform: translateX(8px); }
+  60%      { transform: translateX(-5px); }
+  80%      { transform: translateX(5px); }
+}
+
+.cbt-fitb-btn {
+  align-self: flex-start;
+}
+
+.cbt-fitb-btn:disabled {
+  opacity: 0.5;
+  pointer-events: none;
+}
+
+/* ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+   TAKE TEST BUTTON
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ */
+.btn-test {
+  background: linear-gradient(135deg, #2a4a8a 0%, #1a2e5a 100%);
+  color: #c8d8f8;
+  border: 1px solid rgba(100,150,255,0.3);
+}
+.btn-test:hover {
+  background: linear-gradient(135deg, #3a5aaa 0%, #2a4080 100%);
+  border-color: rgba(100,150,255,0.55);
+  transform: translateY(-1px);
+  box-shadow: 0 4px 14px rgba(50,100,220,0.3);
+}
+
+/* ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+   TEST REVIEW PANEL
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ */
+.test-review {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.test-review-header {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding-bottom: 14px;
+  border-bottom: 1px solid var(--border);
+  margin-bottom: 4px;
+}
+
+.review-item {
+  border-radius: var(--radius-sm);
+  padding: 14px 16px;
+  border-left: 3px solid var(--border);
+  background: rgba(255,255,255,0.02);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.review-item.review-correct {
+  border-left-color: var(--teal);
+  background: rgba(42,157,143,0.05);
+}
+
+.review-item.review-wrong {
+  border-left-color: var(--crimson);
+  background: rgba(192,57,43,0.05);
+}
+
+.review-item.review-skipped {
+  border-left-color: var(--text-dim);
+  opacity: 0.7;
+}
+
+.review-q-header {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+}
+
+.review-q-num {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 0.72rem;
+  font-weight: 600;
+  color: var(--text-muted);
+  white-space: nowrap;
+  margin-top: 2px;
+}
+
+.review-q-text {
+  font-family: 'Lora', serif;
+  font-size: 0.88rem;
+  color: var(--text);
+  line-height: 1.5;
+}
+
+.review-answer-row {
+  display: flex;
+  gap: 8px;
+  align-items: baseline;
+  flex-wrap: wrap;
+  font-size: 0.82rem;
+}
+
+.review-label {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 0.68rem;
+  color: var(--text-dim);
+  white-space: nowrap;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.review-val-correct {
+  color: var(--teal);
+  font-family: 'Lora', serif;
+  font-weight: 600;
+}
+
+.review-val-wrong {
+  color: #e67e73;
+  font-family: 'Lora', serif;
+  text-decoration: line-through;
+  opacity: 0.85;
+}
+
+.review-explanation {
+  font-family: 'Lora', serif;
+  font-size: 0.82rem;
+  color: var(--text-muted);
+  line-height: 1.55;
+  padding-top: 6px;
+  border-top: 1px solid rgba(255,255,255,0.05);
+}
