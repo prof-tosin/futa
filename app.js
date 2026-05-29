@@ -17,23 +17,26 @@ let cbtTimer = null;
 /* ─────────────────────────────────────────────────────────────────
    ROUTING
 ───────────────────────────────────────────────────────────────── */
-function navigate(page, levelId, courseCode, semId) {
-  state = { page, levelId: levelId || null, semId: semId || null, courseCode: courseCode || null };
+function navigate(page, levelId, courseCode, semId, chapterIdx) {
+  state = { page, levelId: levelId || null, semId: semId || null, courseCode: courseCode || null, chapterIdx: chapterIdx != null ? chapterIdx : null };
   document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
   document.getElementById('page-' + page).classList.add('active');
   updateBreadcrumb();
   window.scrollTo({ top: 0, behavior: 'smooth' });
-  if (page === 'home')   renderHome();
-  if (page === 'level')  renderLevel(levelId);
-  if (page === 'course') renderCourse(levelId, courseCode);
+  if (page === 'home')    renderHome();
+  if (page === 'level')   renderLevel(levelId);
+  if (page === 'course')  renderCourse(levelId, courseCode);
+  if (page === 'chapter') renderChapter(levelId, courseCode, chapterIdx);
 
-  // Update browser URL
+  // Update URL
   if (page === 'home') {
     history.pushState({}, '', '/futa/');
   } else if (page === 'level') {
     history.pushState({}, '', '/futa/#level/' + levelId);
   } else if (page === 'course') {
     history.pushState({}, '', '/futa/#course/' + levelId + '/' + courseCode);
+  } else if (page === 'chapter') {
+    history.pushState({}, '', '/futa/#chapter/' + levelId + '/' + courseCode + '/' + chapterIdx);
   }
 }
 
@@ -53,10 +56,20 @@ function updateBreadcrumb() {
     });
     if (course) crumbs.push({ label: course.code, page: 'course', levelId: state.levelId, courseCode: state.courseCode });
   }
+   if (state.chapterIdx != null && state.courseCode && state.levelId) {
+    const lvl = PORTAL_DATA.levels.find(l => l.id === state.levelId);
+    let chapter = null;
+    lvl?.semesters.forEach(s => {
+      const c = s.courses.find(c => c.code === state.courseCode);
+      if (c && c.chapters[state.chapterIdx]) chapter = c.chapters[state.chapterIdx];
+    });
+    if (chapter) crumbs.push({ label: 'Ch. ' + chapter.number + ' — ' + chapter.title, page: 'chapter', levelId: state.levelId, courseCode: state.courseCode, chapterIdx: state.chapterIdx });
+  }
+
   bc.innerHTML = crumbs.map((c, i) => {
     const isLast = i === crumbs.length - 1;
     if (isLast) return `<span class="crumb active">${c.label}</span>`;
-    return `<span class="crumb" onclick="navigate('${c.page}','${c.levelId||''}','${c.courseCode||''}')"><span>${c.label}</span></span><span class="sep">/</span>`;
+    return `<span class="crumb" onclick="navigate('${c.page}','${c.levelId||''}','${c.courseCode||''}',null,${c.chapterIdx != null ? c.chapterIdx : 'null'})"><span>${c.label}</span></span><span class="sep">/</span>`;
   }).join('');
 }
 
@@ -205,31 +218,55 @@ function renderCourse(levelId, courseCode) {
   }
 
   container.innerHTML = `<div class="chapter-list">${course.chapters.map((ch, idx) => `
-    <div class="chapter-item" id="ch-${idx}">
-      <div class="chapter-header" onclick="toggleChapter(${idx})">
+    <div class="chapter-item" onclick="navigate('chapter','${escQ(levelId)}','${escQ(courseCode)}',null,${idx})" style="cursor:pointer;">
+      <div class="chapter-header">
         <div class="ch-num">${String(ch.number).padStart(2,'0')}</div>
         <div class="ch-info">
           <div class="ch-label">Chapter ${ch.number}</div>
           <div class="ch-title">${ch.title}</div>
         </div>
-        <div class="ch-toggle">▾</div>
-      </div>
-      <div class="chapter-body">
-        ${ch.summary ? `<div class="ch-summary">${ch.summary}</div>` : ''}
-        ${ch.keyPoints && ch.keyPoints.length ? `
-          <div class="ch-keypoints">
-            <div class="ch-keypoints-title">Key Points</div>
-            <ul>${ch.keyPoints.map(kp => `<li>${kp}</li>`).join('')}</ul>
-          </div>` : ''}
-        <div class="ch-actions">
-          ${ch.pdfUrl ? `<a class="btn btn-secondary" href="${ch.pdfUrl}" target="_blank" rel="noopener">📄 Read PDF</a>` : ''}
-          ${(ch.questions && ch.questions.length) ? `<button class="btn btn-primary" onclick="startCBT('${escQ(courseCode)}','${escQ(levelId)}',${idx}, false)">🎯 Practice CBT</button>` : ''}
-          ${(ch.questions && ch.questions.length) ? `<button class="btn btn-test" onclick="startCBT('${escQ(courseCode)}','${escQ(levelId)}',${idx}, true)">📝 Take Test</button>` : ''}
-          ${ch.cbtUrl ? `<a class="btn btn-ghost" href="${ch.cbtUrl}" target="_blank" rel="noopener">🔗 External CBT</a>` : ''}
-        </div>
+        <div class="ch-toggle">→</div>
       </div>
     </div>`).join('')}
   </div>`;
+}
+
+/* ─────────────────────────────────────────────────────────────────
+   CHAPTER PAGE
+───────────────────────────────────────────────────────────────── */
+function renderChapter(levelId, courseCode, chapterIdx) {
+  const lvl = PORTAL_DATA.levels.find(l => l.id === levelId);
+  let course = null, semName = '';
+  lvl?.semesters.forEach(s => {
+    const c = s.courses.find(c => c.code === courseCode);
+    if (c) { course = c; semName = s.name; }
+  });
+  if (!course) return;
+
+  const ch = course.chapters[chapterIdx];
+  if (!ch) return;
+
+  document.getElementById('chapter-tag').textContent = lvl.name + ' · ' + courseCode + ' · Chapter ' + ch.number;
+  document.getElementById('chapter-title').textContent = ch.title;
+  document.getElementById('chapter-back-btn').onclick = () => navigate('course', levelId, courseCode);
+
+  const container = document.getElementById('chapter-detail-content');
+  container.innerHTML = `
+    <div class="chapter-full">
+      ${ch.summary ? `<div class="ch-summary">${ch.summary}</div>` : ''}
+      ${ch.keyPoints && ch.keyPoints.length ? `
+        <div class="ch-keypoints">
+          <div class="ch-keypoints-title">Key Points</div>
+          <ul>${ch.keyPoints.map(kp => `<li>${kp}</li>`).join('')}</ul>
+        </div>` : ''}
+      <div class="ch-actions" style="margin-top:24px;">
+        ${ch.pdfUrl ? `<a class="btn btn-secondary" href="${ch.pdfUrl}" target="_blank" rel="noopener">📄 Read PDF</a>` : ''}
+        ${(ch.questions && ch.questions.length) ? `<button class="btn btn-primary" onclick="startCBT('${escQ(courseCode)}','${escQ(levelId)}',${chapterIdx}, false)">🎯 Practice CBT</button>` : ''}
+        ${(ch.questions && ch.questions.length) ? `<button class="btn btn-test" onclick="startCBT('${escQ(courseCode)}','${escQ(levelId)}',${chapterIdx}, true)">📝 Take Test</button>` : ''}
+        ${ch.cbtUrl ? `<a class="btn btn-ghost" href="${ch.cbtUrl}" target="_blank" rel="noopener">🔗 External CBT</a>` : ''}
+      </div>
+    </div>
+  `;
 }
 
 function toggleChapter(idx) {
@@ -829,8 +866,10 @@ if (_cbtModal) {
 try {
   const hash = window.location.hash;
   if (hash.startsWith('#level/')) {
-    const levelId = hash.replace('#level/', '');
-    navigate('level', levelId);
+    navigate('level', hash.replace('#level/', ''));
+  } else if (hash.startsWith('#chapter/')) {
+    const parts = hash.replace('#chapter/', '').split('/');
+    navigate('chapter', parts[0], parts[1], null, parseInt(parts[2]));
   } else if (hash.startsWith('#course/')) {
     const parts = hash.replace('#course/', '').split('/');
     navigate('course', parts[0], parts[1]);
