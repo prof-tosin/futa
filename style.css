@@ -1664,3 +1664,53 @@ nav {
   outline-offset: 2px;
   border-radius: 4px;
 }
+
+/* ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+   GET STARTED BUTTON (Home → Levels)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ */
+.hero-cta {
+  margin-top: 40px;
+  display: flex;
+  justify-content: center;
+}
+
+.btn-get-started {
+  padding: 18px 52px;
+  font-size: 1rem;
+  font-weight: 700;
+  font-family: 'Outfit', sans-serif;
+  background: linear-gradient(135deg, var(--cyan) 0%, var(--cyan-dim) 100%);
+  color: var(--bg);
+  border: none;
+  border-radius: var(--radius);
+  cursor: pointer;
+  box-shadow: 0 0 32px rgba(34,211,238,0.3), 0 4px 20px rgba(0,0,0,0.4);
+  transition: transform var(--transition-bounce), box-shadow var(--transition);
+  letter-spacing: 0.01em;
+  position: relative;
+  overflow: hidden;
+}
+.btn-get-started::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: rgba(255,255,255,0);
+  transition: background var(--transition);
+}
+.btn-get-started:hover {
+  transform: translateY(-4px) scale(1.03);
+  box-shadow: 0 0 56px rgba(34,211,238,0.5), 0 8px 32px rgba(0,0,0,0.5);
+}
+.btn-get-started:hover::before {
+  background: rgba(255,255,255,0.08);
+}
+.btn-get-started:active {
+  transform: translateY(-1px) scale(1.01);
+}
+
+@media (max-width: 640px) {
+  .btn-get-started {
+    padding: 16px 36px;
+    font-size: 0.95rem;
+  }
+}
