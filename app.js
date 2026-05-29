@@ -26,6 +26,15 @@ function navigate(page, levelId, courseCode, semId) {
   if (page === 'home')   renderHome();
   if (page === 'level')  renderLevel(levelId);
   if (page === 'course') renderCourse(levelId, courseCode);
+
+  // Update browser URL
+  if (page === 'home') {
+    history.pushState({}, '', '/futa/');
+  } else if (page === 'level') {
+    history.pushState({}, '', '/futa/#level/' + levelId);
+  } else if (page === 'course') {
+    history.pushState({}, '', '/futa/#course/' + levelId + '/' + courseCode);
+  }
 }
 
 function updateBreadcrumb() {
@@ -818,8 +827,17 @@ if (_cbtModal) {
    INIT
 ───────────────────────────────────────────────────────────────── */
 try {
-  renderHome();
-  updateBreadcrumb();
+  const hash = window.location.hash;
+  if (hash.startsWith('#level/')) {
+    const levelId = hash.replace('#level/', '');
+    navigate('level', levelId);
+  } else if (hash.startsWith('#course/')) {
+    const parts = hash.replace('#course/', '').split('/');
+    navigate('course', parts[0], parts[1]);
+  } else {
+    renderHome();
+    updateBreadcrumb();
+  }
 } catch (err) {
   console.error('[FUTA Portal] Init error — check that data.js is loaded before app.js:', err);
 }
