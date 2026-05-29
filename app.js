@@ -9,7 +9,7 @@
 
 "use strict";
 
-let state = { page: "home", levelId: null, semId: null, courseCode: null };
+let state = { page: "home", levelId: null, semId: null, courseCode: null, chapterIdx: null };
 let cbtState = {};
 let activeSemTab = {};
 let cbtTimer = null;
@@ -18,19 +18,29 @@ let cbtTimer = null;
    ROUTING
 ───────────────────────────────────────────────────────────────── */
 function navigate(page, levelId, courseCode, semId, chapterIdx) {
-  state = { page, levelId: levelId || null, semId: semId || null, courseCode: courseCode || null, chapterIdx: chapterIdx != null ? chapterIdx : null };
+  state = {
+    page,
+    levelId: levelId || null,
+    semId: semId || null,
+    courseCode: courseCode || null,
+    chapterIdx: chapterIdx != null ? chapterIdx : null
+  };
   document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
   document.getElementById('page-' + page).classList.add('active');
   updateBreadcrumb();
   window.scrollTo({ top: 0, behavior: 'smooth' });
+
   if (page === 'home')    renderHome();
+  if (page === 'levels')  renderLevels();
   if (page === 'level')   renderLevel(levelId);
   if (page === 'course')  renderCourse(levelId, courseCode);
   if (page === 'chapter') renderChapter(levelId, courseCode, chapterIdx);
 
-  // Update URL
+  // Update browser URL
   if (page === 'home') {
     history.pushState({}, '', '/futa/');
+  } else if (page === 'levels') {
+    history.pushState({}, '', '/futa/#levels');
   } else if (page === 'level') {
     history.pushState({}, '', '/futa/#level/' + levelId);
   } else if (page === 'course') {
@@ -43,10 +53,16 @@ function navigate(page, levelId, courseCode, semId, chapterIdx) {
 function updateBreadcrumb() {
   const bc = document.getElementById('breadcrumb');
   const crumbs = [{ label: 'Home', page: 'home' }];
+
+  if (['levels', 'level', 'course', 'chapter'].includes(state.page)) {
+    crumbs.push({ label: 'Levels', page: 'levels' });
+  }
+
   if (state.levelId) {
     const lvl = PORTAL_DATA.levels.find(l => l.id === state.levelId);
     if (lvl) crumbs.push({ label: lvl.name, page: 'level', levelId: state.levelId });
   }
+
   if (state.courseCode && state.levelId) {
     const lvl = PORTAL_DATA.levels.find(l => l.id === state.levelId);
     let course = null;
@@ -56,14 +72,21 @@ function updateBreadcrumb() {
     });
     if (course) crumbs.push({ label: course.code, page: 'course', levelId: state.levelId, courseCode: state.courseCode });
   }
-   if (state.chapterIdx != null && state.courseCode && state.levelId) {
+
+  if (state.chapterIdx != null && state.courseCode && state.levelId) {
     const lvl = PORTAL_DATA.levels.find(l => l.id === state.levelId);
     let chapter = null;
     lvl?.semesters.forEach(s => {
       const c = s.courses.find(c => c.code === state.courseCode);
       if (c && c.chapters[state.chapterIdx]) chapter = c.chapters[state.chapterIdx];
     });
-    if (chapter) crumbs.push({ label: 'Ch. ' + chapter.number + ' — ' + chapter.title, page: 'chapter', levelId: state.levelId, courseCode: state.courseCode, chapterIdx: state.chapterIdx });
+    if (chapter) crumbs.push({
+      label: 'Ch. ' + chapter.number + ' — ' + chapter.title,
+      page: 'chapter',
+      levelId: state.levelId,
+      courseCode: state.courseCode,
+      chapterIdx: state.chapterIdx
+    });
   }
 
   bc.innerHTML = crumbs.map((c, i) => {
@@ -96,8 +119,15 @@ function renderHome() {
     <div class="stat"><div class="stat-num">${totalChapters}</div><div class="stat-label">Chapters</div></div>
     <div class="stat"><div class="stat-num">${totalQ}+</div><div class="stat-label">Practice Questions</div></div>
   `;
+}
 
+/* ─────────────────────────────────────────────────────────────────
+   LEVELS PAGE
+───────────────────────────────────────────────────────────────── */
+function renderLevels() {
   const grid = document.getElementById('level-grid');
+  if (!grid) return;
+
   grid.innerHTML = PORTAL_DATA.levels.map(lvl => {
     const totalCrs = lvl.semesters.reduce((sum, s) => sum + s.courses.length, 0);
     const hasCourses = totalCrs > 0;
@@ -453,7 +483,6 @@ function renderQuestionNav() {
     } else if (i > current) {
       cls += ' qnav-future';
     } else {
-      /* Visited but not answered (skipped) */
       cls += ' qnav-skipped';
     }
     return `<button class="${cls}" onclick="jumpToQuestion(${i})" title="Question ${i + 1}">${i + 1}</button>`;
@@ -477,10 +506,10 @@ function updateQuestionNav() {
   const { questions, current, userAnswers } = cbtState;
   navEl.innerHTML = questions.map((q, i) => {
     let cls = 'qnav-box';
-    if (i === current)            cls += ' qnav-current';
+    if (i === current)                cls += ' qnav-current';
     else if (userAnswers[i] !== null) cls += ' qnav-answered';
-    else if (i > current)         cls += ' qnav-future';
-    else                          cls += ' qnav-skipped';
+    else if (i > current)             cls += ' qnav-future';
+    else                              cls += ' qnav-skipped';
     return `<button class="${cls}" onclick="jumpToQuestion(${i})" title="Question ${i + 1}">${i + 1}</button>`;
   }).join('');
 }
@@ -639,7 +668,6 @@ function saveAndNext() {
   _saveCurrentFITBIfTest();
   const { current, questions } = cbtState;
   if (current + 1 >= questions.length) {
-    /* Calculate final score from all userAnswers */
     cbtState.score = cbtState.userAnswers.filter(a => a && a.isCorrect).length;
     showCBTResults();
   } else {
@@ -677,12 +705,10 @@ function showCBTResults(timeExpired = false) {
   clearInterval(cbtTimer);
   const { questions, isTest, userAnswers } = cbtState;
 
-  /* In test mode: save any in-progress FITB answer first */
   if (isTest) {
     _saveCurrentFITBIfTest();
   }
 
-  /* Calculate score */
   const score = isTest
     ? cbtState.userAnswers.filter(a => a && a.isCorrect).length
     : cbtState.score;
@@ -865,7 +891,9 @@ if (_cbtModal) {
 ───────────────────────────────────────────────────────────────── */
 try {
   const hash = window.location.hash;
-  if (hash.startsWith('#level/')) {
+  if (hash === '#levels') {
+    navigate('levels');
+  } else if (hash.startsWith('#level/')) {
     navigate('level', hash.replace('#level/', ''));
   } else if (hash.startsWith('#chapter/')) {
     const parts = hash.replace('#chapter/', '').split('/');
