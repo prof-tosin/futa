@@ -18,7 +18,7 @@
   <div class="nav-breadcrumb" id="breadcrumb"></div>
 </nav>
 
-<!-- PAGE: HOME -->
+<!-- PAGE: HOME (Landing) -->
 <div class="page active" id="page-home">
   <div class="hero">
     <div class="hero-ornament"></div>
@@ -27,13 +27,24 @@
     <div class="hero-rule"></div>
     <p>Your official academic companion. Access course summaries, practice CBT questions, and study materials — all in one place.</p>
     <div class="hero-stats" id="hero-stats"></div>
+    <div class="hero-cta">
+      <button class="btn-get-started" onclick="navigate('levels')">
+        🎓 Select Your Level
+      </button>
+    </div>
+  </div>
+</div>
+
+<!-- PAGE: LEVELS (Select Level) -->
+<div class="page" id="page-levels">
+  <div class="page-header">
+    <button class="back-btn" onclick="navigate('home')">← Home</button>
+    <div class="page-header-tag">Academic Levels</div>
+    <h2>Select Your Level</h2>
+    <p>Choose an academic level to browse semesters, courses, and study materials.</p>
+    <div class="page-header-rule"></div>
   </div>
   <div class="container">
-    <div class="section-head">
-      <div class="section-title">Select Your Level</div>
-      <div class="section-rule"></div>
-    </div>
-    <p class="section-sub">Choose an academic level to browse semesters, courses, and study materials.</p>
     <div class="level-grid" id="level-grid"></div>
   </div>
 </div>
@@ -41,7 +52,7 @@
 <!-- PAGE: LEVEL (courses by semester) -->
 <div class="page" id="page-level">
   <div class="page-header">
-    <button class="back-btn" onclick="navigate('home')">← All Levels</button>
+    <button class="back-btn" onclick="navigate('levels')">← All Levels</button>
     <div class="page-header-tag" id="level-tag"></div>
     <h2 id="level-title"></h2>
     <p id="level-desc"></p>
@@ -65,7 +76,8 @@
     <div id="chapter-content"></div>
   </div>
 </div>
-  <!-- PAGE: CHAPTER -->
+
+<!-- PAGE: CHAPTER -->
 <div class="page" id="page-chapter">
   <div class="page-header">
     <button class="back-btn" id="chapter-back-btn">← Back to Courses</button>
@@ -117,30 +129,18 @@
 <script src="courses/phy108.js"></script>
 <script src="courses/che104.js"></script>
 <script src="courses/bio104.js"></script>
-<script src="courses/bio104.js"></script>
 <script src="courses/mts102.js"></script>
 <script src="courses/mts104.js"></script>
 <script src="courses/csc102.js"></script>
 <script src="courses/eee102.js"></script>
-<script src="courses/gns106.js"></script>
-  
+
 <!-- 3. Data THIRD — reads _COURSE_REGISTRY -->
 <script src="data.js"></script>
 
 <!-- 4. App LAST — renders everything -->
 <script src="app.js"></script>
 
-<script>
-  console.log("Registry:", _COURSE_REGISTRY);
-  console.log("MTS 101 chapters:", _COURSE_REGISTRY["MTS 101"]);
-  
-  const lvl = PORTAL_DATA.levels.find(l => l.id === "100");
-  const sem = lvl.semesters.find(s => s.id === "1st");
-  const course = sem.courses.find(c => c.code === "MTS 101");
-  console.log("Course chapters after inject:", course.chapters.length);
-</script>
-
-  <!-- Default Statcounter code for FUTA Online Class
+<!-- Default Statcounter code for FUTA Online Class
 http://prof-tosin.github.io/futa -->
 <script type="text/javascript">
 var sc_project=13256945; 
