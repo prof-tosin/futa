@@ -38,15 +38,15 @@ function navigate(page, levelId, courseCode, semId, chapterIdx) {
 
   // Update browser URL
   if (page === 'home') {
-    history.pushState({}, '', '/futa/');
+    history.pushState({}, '', '/');
   } else if (page === 'levels') {
-    history.pushState({}, '', '/futa/#levels');
+    history.pushState({}, '', '/#levels');
   } else if (page === 'level') {
-    history.pushState({}, '', '/futa/#level/' + levelId);
+    history.pushState({}, '', '/#level/' + levelId);
   } else if (page === 'course') {
-    history.pushState({}, '', '/futa/#course/' + levelId + '/' + courseCode);
+    history.pushState({}, '', '/#course/' + levelId + '/' + courseCode);
   } else if (page === 'chapter') {
-    history.pushState({}, '', '/futa/#chapter/' + levelId + '/' + courseCode + '/' + chapterIdx);
+    history.pushState({}, '', '/#chapter/' + levelId + '/' + courseCode + '/' + chapterIdx);
   }
 }
 
