@@ -887,6 +887,31 @@ if (_cbtModal) {
 }
 
 /* ─────────────────────────────────────────────────────────────────
+   BACK / FORWARD BUTTON SUPPORT
+───────────────────────────────────────────────────────────────── */
+window.addEventListener('popstate', function() {
+  const hash = window.location.hash;
+  if (!hash || hash === '#home') {
+    state = { page: 'home', levelId: null, semId: null, courseCode: null, chapterIdx: null };
+    document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
+    document.getElementById('page-home').classList.add('active');
+    renderHome();
+    updateBreadcrumb();
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  } else if (hash === '#levels') {
+    navigate('levels');
+  } else if (hash.startsWith('#level/')) {
+    navigate('level', hash.replace('#level/', ''));
+  } else if (hash.startsWith('#course/')) {
+    const parts = hash.replace('#course/', '').split('/');
+    navigate('course', parts[0], parts[1]);
+  } else if (hash.startsWith('#chapter/')) {
+    const parts = hash.replace('#chapter/', '').split('/');
+    navigate('chapter', parts[0], parts[1], null, parseInt(parts[2]));
+  }
+});
+
+/* ─────────────────────────────────────────────────────────────────
    INIT
 ───────────────────────────────────────────────────────────────── */
 try {
