@@ -11,7 +11,13 @@
  * This file must be loaded in index.html BEFORE data.js and app.js.
  */
 
-PORTAL_INJECT("BIO 102", [
+PORTAL_INJECT({
+  id:          'bio102',          // unique, lowercase, no spaces
+  title:       'Course Full Name',
+  code:        'BIO 102',          // displayed on card
+  level:       '100l',            // must match table above
+  semester:    '1',               // '1', '2', or 'both'
+  description: 'One sentence about the course.',
 
   // ─────────────────────────────────────────────────────────────────────────────
   {
@@ -1973,4 +1979,4 @@ PORTAL_INJECT("BIO 102", [
     ]
   }
 
-]); // end PORTAL_INJECT for BIO 102
+              }); // end PORTAL_INJECT for BIO 102
