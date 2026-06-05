@@ -1,1111 +1,461 @@
 <!DOCTYPE html>
-
-<html lang="en" data-theme="system">
+<html lang="en">
 <head>
-<meta charset="UTF-8" />
-<meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<title>FUTA Online Class</title>
-<link rel="preconnect" href="https://fonts.googleapis.com" />
-<link href="https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,500;0,700;0,900;1,700&family=Lora:ital,wght@0,400;0,500;0,600;1,400&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet" />
-<link rel="stylesheet" href="style.css" />
-<style>
-/* ============================================================
-   THEME VARIABLES
-============================================================ */
-:root {
-  --theme-transition: background 0.3s, color 0.3s, border-color 0.3s, box-shadow 0.3s;
-}
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>FUTA Online Class — Study Portal</title>
+  <meta name="description" content="CBT practice portal for Federal University of Technology Akure students. Study notes, past questions and timed tests." />
 
-/* Light Mode */
-[data-theme=“light”] {
-–bg: #faf8f3;
-–bg2: #f0ece0;
-–surface: #ffffff;
-–surface2: #f5f1e8;
-–text: #1a1208;
-–text2: #4a3f2a;
-–text3: #7a6a50;
-–accent: #8b2e2e;
-–accent2: #c0762a;
-–border: #d4c9b0;
-–shadow: rgba(26,18,8,0.12);
-–nav-bg: rgba(250,248,243,0.96);
-–footer-bg: #1a1208;
-–footer-text: #d4c9b0;
-–modal-bg: rgba(26,18,8,0.55);
-–tag-bg: #f0e8d0;
-–tag-text: #8b2e2e;
-–btn-primary: #8b2e2e;
-–btn-primary-text: #fff;
-–btn-secondary: transparent;
-–btn-secondary-border: #8b2e2e;
-–btn-secondary-text: #8b2e2e;
-–card-bg: #ffffff;
-–card-hover: #fffdf7;
-–input-bg: #ffffff;
-–input-border: #d4c9b0;
-–fab-bg: #8b2e2e;
-–fab-text: #fff;
-–success: #2d7a4f;
-–error: #c0392b;
-–whatsapp: #25D366;
-–support: #1a6baf;
-}
+  <!-- Fonts -->
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,400;0,600;0,700;0,900;1,400;1,700&family=Lora:ital,wght@0,400;0,500;0,600;1,400&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
 
-/* Dark Mode */
-[data-theme=“dark”] {
-–bg: #0f0d08;
-–bg2: #1a1510;
-–surface: #1e1a12;
-–surface2: #252016;
-–text: #f0e8d4;
-–text2: #c8bea8;
-–text3: #8c7f6a;
-–accent: #d4604a;
-–accent2: #d4924a;
-–border: #332c1e;
-–shadow: rgba(0,0,0,0.45);
-–nav-bg: rgba(15,13,8,0.96);
-–footer-bg: #080705;
-–footer-text: #8c7f6a;
-–modal-bg: rgba(0,0,0,0.75);
-–tag-bg: #2a2016;
-–tag-text: #d4604a;
-–btn-primary: #d4604a;
-–btn-primary-text: #fff;
-–btn-secondary: transparent;
-–btn-secondary-border: #d4604a;
-–btn-secondary-text: #d4604a;
-–card-bg: #1e1a12;
-–card-hover: #252016;
-–input-bg: #1e1a12;
-–input-border: #332c1e;
-–fab-bg: #d4604a;
-–fab-text: #fff;
-–success: #4caf7d;
-–error: #e57373;
-–whatsapp: #25D366;
-–support: #4a9fe0;
-}
+  <!-- Icons -->
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css" />
 
-/* System Default — follows OS preference */
-[data-theme=“system”] {
-–bg: #faf8f3;
-–bg2: #f0ece0;
-–surface: #ffffff;
-–surface2: #f5f1e8;
-–text: #1a1208;
-–text2: #4a3f2a;
-–text3: #7a6a50;
-–accent: #8b2e2e;
-–accent2: #c0762a;
-–border: #d4c9b0;
-–shadow: rgba(26,18,8,0.12);
-–nav-bg: rgba(250,248,243,0.96);
-–footer-bg: #1a1208;
-–footer-text: #d4c9b0;
-–modal-bg: rgba(26,18,8,0.55);
-–tag-bg: #f0e8d0;
-–tag-text: #8b2e2e;
-–btn-primary: #8b2e2e;
-–btn-primary-text: #fff;
-–btn-secondary: transparent;
-–btn-secondary-border: #8b2e2e;
-–btn-secondary-text: #8b2e2e;
-–card-bg: #ffffff;
-–card-hover: #fffdf7;
-–input-bg: #ffffff;
-–input-border: #d4c9b0;
-–fab-bg: #8b2e2e;
-–fab-text: #fff;
-–success: #2d7a4f;
-–error: #c0392b;
-–whatsapp: #25D366;
-–support: #1a6baf;
-}
-
-@media (prefers-color-scheme: dark) {
-[data-theme=“system”] {
-–bg: #0f0d08;
-–bg2: #1a1510;
-–surface: #1e1a12;
-–surface2: #252016;
-–text: #f0e8d4;
-–text2: #c8bea8;
-–text3: #8c7f6a;
-–accent: #d4604a;
-–accent2: #d4924a;
-–border: #332c1e;
-–shadow: rgba(0,0,0,0.45);
-–nav-bg: rgba(15,13,8,0.96);
-–footer-bg: #080705;
-–footer-text: #8c7f6a;
-–modal-bg: rgba(0,0,0,0.75);
-–tag-bg: #2a2016;
-–tag-text: #d4604a;
-–btn-primary: #d4604a;
-–btn-primary-text: #fff;
-–btn-secondary: transparent;
-–btn-secondary-border: #d4604a;
-–btn-secondary-text: #d4604a;
-–card-bg: #1e1a12;
-–card-hover: #252016;
-–input-bg: #1e1a12;
-–input-border: #332c1e;
-–fab-bg: #d4604a;
-–fab-text: #fff;
-–success: #4caf7d;
-–error: #e57373;
-–whatsapp: #25D366;
-–support: #4a9fe0;
-}
-}
-
-/* ============================================================
-BASE OVERRIDES FOR THEMING
-============================================================ */
-body {
-background: var(–bg) !important;
-color: var(–text) !important;
-transition: var(–theme-transition);
-}
-
-nav {
-background: var(–nav-bg) !important;
-border-bottom: 1px solid var(–border) !important;
-box-shadow: 0 2px 8px var(–shadow) !important;
-transition: var(–theme-transition);
-}
-
-.nav-logo, .nav-crest { color: var(–text) !important; }
-.nav-logo span, .nav-breadcrumb { color: var(–text3) !important; }
-
-.site-footer {
-background: var(–footer-bg) !important;
-color: var(–footer-text) !important;
-transition: var(–theme-transition);
-}
-.footer-logo { color: var(–footer-text) !important; }
-.footer-tagline, .footer-credit { color: var(–text3) !important; }
-
-/* Hero */
-.hero { background: var(–bg2) !important; color: var(–text) !important; }
-.hero-badge { background: var(–tag-bg) !important; color: var(–tag-text) !important; }
-.hero h1 { color: var(–text) !important; }
-.hero p { color: var(–text2) !important; }
-.hero-rule { background: var(–border) !important; }
-
-/* Cards */
-.level-card, .course-card, .chapter-card {
-background: var(–card-bg) !important;
-border-color: var(–border) !important;
-color: var(–text) !important;
-transition: var(–theme-transition);
-}
-.level-card:hover, .course-card:hover, .chapter-card:hover {
-background: var(–card-hover) !important;
-box-shadow: 0 6px 24px var(–shadow) !important;
-}
-
-/* Page header */
-.page-header { background: var(–bg2) !important; border-bottom: 1px solid var(–border) !important; }
-.page-header h2 { color: var(–text) !important; }
-.page-header p { color: var(–text2) !important; }
-.page-header-tag { background: var(–tag-bg) !important; color: var(–tag-text) !important; }
-.page-header-rule { background: var(–border) !important; }
-
-/* Back button */
-.back-btn {
-background: transparent !important;
-color: var(–accent) !important;
-border: 1px solid var(–accent) !important;
-}
-.back-btn:hover { background: var(–accent) !important; color: #fff !important; }
-
-/* Modals */
-.modal-overlay { background: var(–modal-bg) !important; }
-.modal { background: var(–surface) !important; border: 1px solid var(–border) !important; }
-.modal-title { color: var(–text) !important; }
-.modal-subtitle { color: var(–text2) !important; }
-.modal-close { color: var(–text3) !important; background: transparent !important; border: none !important; }
-.modal-close:hover { color: var(–accent) !important; }
-
-/* CBT */
-.cbt-question { color: var(–text) !important; }
-.cbt-option { background: var(–surface2) !important; border-color: var(–border) !important; color: var(–text) !important; }
-.cbt-option:hover { border-color: var(–accent) !important; background: var(–tag-bg) !important; }
-
-/* Get started button */
-.btn-get-started {
-background: var(–btn-primary) !important;
-color: var(–btn-primary-text) !important;
-transition: transform 0.2s, box-shadow 0.2s !important;
-}
-.btn-get-started:hover { transform: translateY(-2px) !important; box-shadow: 0 6px 20px var(–shadow) !important; }
-
-/* ============================================================
-THEME TOGGLE BUTTON (top-right of nav)
-============================================================ */
-.theme-toggle-btn {
-display: flex;
-align-items: center;
-gap: 6px;
-margin-left: auto;
-padding: 6px 14px;
-border-radius: 20px;
-border: 1.5px solid var(–border);
-background: var(–surface2);
-color: var(–text2);
-cursor: pointer;
-font-size: 13px;
-font-family: ‘Lora’, serif;
-transition: var(–theme-transition);
-white-space: nowrap;
-position: relative;
-}
-.theme-toggle-btn:hover { border-color: var(–accent); color: var(–accent); }
-.theme-toggle-btn .theme-icon { font-size: 16px; }
-
-.theme-dropdown {
-display: none;
-position: absolute;
-top: calc(100% + 8px);
-right: 0;
-background: var(–surface);
-border: 1.5px solid var(–border);
-border-radius: 12px;
-padding: 6px;
-min-width: 160px;
-box-shadow: 0 8px 30px var(–shadow);
-z-index: 9999;
-}
-.theme-dropdown.open { display: block; }
-.theme-option {
-display: flex;
-align-items: center;
-gap: 10px;
-padding: 9px 14px;
-border-radius: 8px;
-cursor: pointer;
-font-size: 14px;
-color: var(–text2);
-font-family: ‘Lora’, serif;
-transition: background 0.15s;
-}
-.theme-option:hover, .theme-option.active {
-background: var(–tag-bg);
-color: var(–accent);
-}
-.theme-option .opt-icon { font-size: 17px; }
-
-/* ============================================================
-FLOATING ACTION BUTTONS (bottom-right)
-============================================================ */
-.fab-group {
-position: fixed;
-bottom: 28px;
-right: 22px;
-display: flex;
-flex-direction: column;
-align-items: flex-end;
-gap: 12px;
-z-index: 1000;
-}
-
-.fab-main {
-width: 52px;
-height: 52px;
-border-radius: 50%;
-background: var(–fab-bg);
-color: var(–fab-text);
-border: none;
-font-size: 22px;
-cursor: pointer;
-box-shadow: 0 4px 18px var(–shadow);
-display: flex;
-align-items: center;
-justify-content: center;
-transition: transform 0.2s, box-shadow 0.2s;
-}
-.fab-main:hover { transform: scale(1.1); box-shadow: 0 8px 28px var(–shadow); }
-
-.fab-mini-group {
-display: flex;
-flex-direction: column;
-align-items: flex-end;
-gap: 10px;
-opacity: 0;
-pointer-events: none;
-transform: translateY(12px);
-transition: opacity 0.25s, transform 0.25s;
-}
-.fab-mini-group.open {
-opacity: 1;
-pointer-events: all;
-transform: translateY(0);
-}
-
-.fab-mini {
-display: flex;
-align-items: center;
-gap: 10px;
-padding: 9px 16px 9px 12px;
-border-radius: 26px;
-border: none;
-cursor: pointer;
-font-size: 14px;
-font-family: ‘Lora’, serif;
-font-weight: 600;
-box-shadow: 0 3px 14px var(–shadow);
-transition: transform 0.15s, box-shadow 0.15s;
-white-space: nowrap;
-text-decoration: none;
-}
-.fab-mini:hover { transform: translateX(-4px); box-shadow: 0 6px 20px var(–shadow); }
-
-.fab-feedback  { background: var(–accent); color: #fff; }
-.fab-contact   { background: var(–whatsapp); color: #fff; }
-.fab-support   { background: var(–support); color: #fff; }
-
-/* ============================================================
-MODAL SHARED BASE
-============================================================ */
-.extra-modal-overlay {
-display: none;
-position: fixed;
-inset: 0;
-background: var(–modal-bg);
-z-index: 5000;
-align-items: center;
-justify-content: center;
-padding: 16px;
-backdrop-filter: blur(4px);
-}
-.extra-modal-overlay.open { display: flex; }
-
-.extra-modal {
-background: var(–surface);
-border: 1.5px solid var(–border);
-border-radius: 18px;
-padding: 32px 28px 28px;
-width: 100%;
-max-width: 460px;
-max-height: 90vh;
-overflow-y: auto;
-position: relative;
-box-shadow: 0 16px 60px var(–shadow);
-animation: slideUp 0.3s cubic-bezier(.22,1,.36,1);
-}
-@keyframes slideUp {
-from { opacity: 0; transform: translateY(30px); }
-to   { opacity: 1; transform: translateY(0); }
-}
-
-.extra-modal-close {
-position: absolute;
-top: 14px; right: 16px;
-background: transparent;
-border: none;
-font-size: 22px;
-cursor: pointer;
-color: var(–text3);
-line-height: 1;
-transition: color 0.15s;
-}
-.extra-modal-close:hover { color: var(–accent); }
-
-.extra-modal h2 {
-font-family: ‘Playfair Display’, serif;
-font-size: 1.5rem;
-color: var(–text);
-margin: 0 0 6px;
-}
-.extra-modal .modal-sub {
-font-family: ‘Lora’, serif;
-font-size: 0.9rem;
-color: var(–text3);
-margin: 0 0 22px;
-}
-
-/* ============================================================
-FEEDBACK FORM
-============================================================ */
-.feedback-form { display: flex; flex-direction: column; gap: 14px; }
-
-.form-group { display: flex; flex-direction: column; gap: 5px; }
-.form-group label {
-font-family: ‘Lora’, serif;
-font-size: 13px;
-font-weight: 600;
-color: var(–text2);
-letter-spacing: 0.04em;
-text-transform: uppercase;
-}
-.form-group input,
-.form-group textarea,
-.form-group select {
-background: var(–input-bg);
-border: 1.5px solid var(–input-border);
-border-radius: 10px;
-padding: 10px 14px;
-font-family: ‘Lora’, serif;
-font-size: 14px;
-color: var(–text);
-resize: none;
-outline: none;
-transition: border-color 0.2s;
-}
-.form-group input:focus,
-.form-group textarea:focus,
-.form-group select:focus { border-color: var(–accent); }
-.form-group textarea { min-height: 100px; }
-
-.form-submit {
-margin-top: 6px;
-padding: 12px;
-background: var(–btn-primary);
-color: var(–btn-primary-text);
-border: none;
-border-radius: 12px;
-font-family: ‘Lora’, serif;
-font-size: 15px;
-font-weight: 600;
-cursor: pointer;
-transition: opacity 0.2s, transform 0.15s;
-}
-.form-submit:hover { opacity: 0.9; transform: translateY(-1px); }
-.form-submit:disabled { opacity: 0.6; cursor: not-allowed; }
-
-.form-status {
-padding: 10px 14px;
-border-radius: 10px;
-font-family: ‘Lora’, serif;
-font-size: 14px;
-display: none;
-}
-.form-status.success { background: color-mix(in srgb, var(–success) 15%, transparent); color: var(–success); border: 1px solid var(–success); display: block; }
-.form-status.error   { background: color-mix(in srgb, var(–error) 15%, transparent); color: var(–error); border: 1px solid var(–error); display: block; }
-
-/* ============================================================
-SUPPORT / BANK DETAILS MODAL
-============================================================ */
-.bank-card {
-background: var(–surface2);
-border: 1.5px solid var(–border);
-border-radius: 14px;
-padding: 20px;
-margin-bottom: 16px;
-}
-.bank-card .bank-name-row {
-display: flex;
-align-items: center;
-gap: 10px;
-margin-bottom: 14px;
-}
-.bank-logo {
-width: 42px; height: 42px;
-border-radius: 10px;
-background: var(–support);
-display: flex; align-items: center; justify-content: center;
-font-size: 20px;
-color: #fff;
-flex-shrink: 0;
-}
-.bank-title { font-family: ‘Playfair Display’, serif; font-size: 1.1rem; color: var(–text); }
-.bank-subtitle { font-family: ‘Lora’, serif; font-size: 12px; color: var(–text3); }
-
-.bank-detail-row {
-display: flex;
-justify-content: space-between;
-align-items: center;
-padding: 9px 0;
-border-bottom: 1px solid var(–border);
-}
-.bank-detail-row:last-child { border-bottom: none; }
-.bank-detail-label { font-family: ‘Lora’, serif; font-size: 12px; color: var(–text3); text-transform: uppercase; letter-spacing: 0.05em; }
-.bank-detail-value { font-family: ‘JetBrains Mono’, monospace; font-size: 14px; color: var(–text); font-weight: 600; display: flex; align-items: center; gap: 6px; }
-
-.copy-btn {
-background: transparent;
-border: 1px solid var(–border);
-border-radius: 6px;
-padding: 3px 8px;
-font-size: 11px;
-cursor: pointer;
-color: var(–text3);
-font-family: ‘Lora’, serif;
-transition: background 0.15s, color 0.15s;
-}
-.copy-btn:hover { background: var(–tag-bg); color: var(–accent); }
-.copy-btn.copied { background: var(–success); color: #fff; border-color: var(–success); }
-
-.support-note {
-font-family: ‘Lora’, serif;
-font-size: 13px;
-color: var(–text3);
-text-align: center;
-padding-top: 8px;
-font-style: italic;
-}
-
-/* ============================================================
-CONTACT (WhatsApp) MODAL
-============================================================ */
-.wa-body {
-display: flex;
-flex-direction: column;
-align-items: center;
-gap: 16px;
-padding: 10px 0;
-}
-.wa-icon-wrap {
-width: 72px; height: 72px;
-background: var(–whatsapp);
-border-radius: 50%;
-display: flex; align-items: center; justify-content: center;
-font-size: 36px;
-box-shadow: 0 6px 24px rgba(37,211,102,0.35);
-}
-.wa-text {
-font-family: ‘Lora’, serif;
-font-size: 15px;
-color: var(–text2);
-text-align: center;
-line-height: 1.6;
-}
-.wa-number {
-font-family: ‘JetBrains Mono’, monospace;
-font-size: 18px;
-color: var(–text);
-font-weight: 600;
-}
-.wa-open-btn {
-display: flex;
-align-items: center;
-gap: 10px;
-padding: 14px 28px;
-background: var(–whatsapp);
-color: #fff;
-border: none;
-border-radius: 14px;
-font-family: ‘Lora’, serif;
-font-size: 15px;
-font-weight: 600;
-cursor: pointer;
-text-decoration: none;
-box-shadow: 0 4px 18px rgba(37,211,102,0.3);
-transition: transform 0.15s, box-shadow 0.15s;
-}
-.wa-open-btn:hover { transform: translateY(-2px); box-shadow: 0 8px 28px rgba(37,211,102,0.4); }
-
-/* ============================================================
-ANNOUNCEMENT BANNER
-============================================================ */
-.announce-bar {
-background: var(–accent);
-color: #fff;
-text-align: center;
-font-family: ‘Lora’, serif;
-font-size: 13px;
-padding: 8px 16px;
-display: flex;
-align-items: center;
-justify-content: center;
-gap: 8px;
-}
-.announce-bar a { color: #ffe0b2; text-decoration: underline; cursor: pointer; }
-.announce-close {
-margin-left: auto;
-background: transparent;
-border: none;
-color: rgba(255,255,255,0.7);
-cursor: pointer;
-font-size: 16px;
-line-height: 1;
-padding: 0 4px;
-}
-
-/* ============================================================
-FOOTER QUICK LINKS
-============================================================ */
-.footer-actions {
-display: flex;
-flex-wrap: wrap;
-justify-content: center;
-gap: 10px;
-margin: 14px 0;
-}
-.footer-action-btn {
-display: flex;
-align-items: center;
-gap: 7px;
-padding: 8px 16px;
-border-radius: 20px;
-border: 1.5px solid rgba(255,255,255,0.18);
-background: transparent;
-color: var(–footer-text);
-font-family: ‘Lora’, serif;
-font-size: 13px;
-cursor: pointer;
-text-decoration: none;
-transition: background 0.15s, border-color 0.15s, color 0.15s;
-}
-.footer-action-btn:hover { background: rgba(255,255,255,0.1); border-color: rgba(255,255,255,0.4); color: #fff; }
-</style>
-
+  <link rel="stylesheet" href="style.css" />
 </head>
 <body>
 
-<!-- ANNOUNCEMENT BAR -->
-
-<div class="announce-bar" id="announce-bar">
-  📢 New courses added! Share feedback & support us to keep this free.
-  <button class="announce-close" onclick="document.getElementById('announce-bar').style.display='none'">✕</button>
-</div>
-
-<!-- NAVIGATION -->
-
+<!-- ══════════════════════════════════════════════════════════
+     NAVIGATION
+═══════════════════════════════════════════════════════════ -->
 <nav>
-  <div class="nav-crest" onclick="navigate('home')">FU</div>
-  <div class="nav-logo" onclick="navigate('home')">FUTA <span>Online Class</span></div>
+  <div class="nav-crest">FC</div>
+  <div class="nav-logo">FUTA <span>Online Class</span></div>
   <div class="nav-divider"></div>
-  <div class="nav-breadcrumb" id="breadcrumb"></div>
-
-  <!-- THEME TOGGLE -->
-
-  <div style="margin-left:auto; position:relative;">
-    <button class="theme-toggle-btn" id="themeToggleBtn" onclick="toggleThemeDropdown()" aria-label="Change theme">
-      <span class="theme-icon" id="themeIcon">🌐</span>
-      <span id="themeLabel">Auto</span>
-    </button>
-    <div class="theme-dropdown" id="themeDropdown">
-      <div class="theme-option" onclick="setTheme('light')">  <span class="opt-icon">☀️</span> Light Mode</div>
-      <div class="theme-option" onclick="setTheme('dark')">   <span class="opt-icon">🌙</span> Dark Mode</div>
-      <div class="theme-option" onclick="setTheme('system')"> <span class="opt-icon">🌐</span> Phone Default</div>
-    </div>
+  <div class="nav-breadcrumb" id="breadcrumb">
+    <span>Home</span>
+  </div>
+  <div class="nav-auth-area" id="nav-auth-area">
+    <!-- Rendered by app.js -->
+    <button class="nav-btn" onclick="openAuthModal('login')">Sign In</button>
+    <button class="nav-btn primary" onclick="openAuthModal('register')">Register</button>
   </div>
 </nav>
 
-<!-- PAGE: HOME (Landing) -->
+<!-- User dropdown (positioned absolutely under nav) -->
+<div class="user-dropdown" id="user-dropdown"></div>
 
+
+<!-- ══════════════════════════════════════════════════════════
+     PAGE: HOME
+═══════════════════════════════════════════════════════════ -->
 <div class="page active" id="page-home">
   <div class="hero">
     <div class="hero-ornament"></div>
     <div class="hero-badge">Federal University of Technology, Akure</div>
-    <h1>Study Smarter<span class="line2">at FUTA</span></h1>
+    <h1>
+      Study Smarter,
+      <span class="line2">Score Higher</span>
+    </h1>
     <div class="hero-rule"></div>
-    <p>Your official academic companion. Access course summaries, practice CBT questions, and study materials — all in one place.</p>
-    <div class="hero-stats" id="hero-stats"></div>
-    <div class="hero-cta">
-      <button class="btn-get-started" onclick="navigate('levels')">
-        🎓 Get Started!
+    <p>
+      Chapter summaries, key points and CBT practice questions
+      for every course — with timed tests, leaderboards and progress tracking.
+    </p>
+    <div class="hero-stats" id="hero-stats">
+      <!-- Filled by app.js -->
+    </div>
+    <button class="btn-get-started" onclick="navigate('levels',true)">
+      <i class="fa-solid fa-graduation-cap"></i>
+      Browse Courses
+    </button>
+  </div>
+
+  <!-- Feature highlights -->
+  <div class="container" style="padding-top:0;padding-bottom:5rem;max-width:860px;margin:0 auto">
+    <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(230px,1fr));gap:1rem;margin-top:1rem">
+
+      <div style="background:var(--navy-2);border:1px solid rgba(201,153,58,.1);border-radius:var(--radius-lg);padding:1.4rem">
+        <div style="font-size:1.4rem;margin-bottom:.6rem">📖</div>
+        <h4 style="margin-bottom:.4rem">Chapter Notes</h4>
+        <p style="font-size:.85rem;color:var(--text-dim)">Concise summaries and key points for every chapter across all courses.</p>
+      </div>
+
+      <div style="background:var(--navy-2);border:1px solid rgba(201,153,58,.1);border-radius:var(--radius-lg);padding:1.4rem">
+        <div style="font-size:1.4rem;margin-bottom:.6rem">🎯</div>
+        <h4 style="margin-bottom:.4rem">Practice CBT</h4>
+        <p style="font-size:.85rem;color:var(--text-dim)">Instant feedback on every question. Combine chapters or whole courses.</p>
+      </div>
+
+      <div style="background:var(--navy-2);border:1px solid rgba(201,153,58,.1);border-radius:var(--radius-lg);padding:1.4rem">
+        <div style="font-size:1.4rem;margin-bottom:.6rem">⏱</div>
+        <h4 style="margin-bottom:.4rem">Timed Tests</h4>
+        <p style="font-size:.85rem;color:var(--text-dim)">Simulate exam conditions. Set your own time and question count.</p>
+      </div>
+
+      <div style="background:var(--navy-2);border:1px solid rgba(201,153,58,.1);border-radius:var(--radius-lg);padding:1.4rem">
+        <div style="font-size:1.4rem;margin-bottom:.6rem">🏆</div>
+        <h4 style="margin-bottom:.4rem">Leaderboard</h4>
+        <p style="font-size:.85rem;color:var(--text-dim)">See the top 5 students per course. Sign in to compete and track your rank.</p>
+      </div>
+
+      <div style="background:var(--navy-2);border:1px solid rgba(201,153,58,.1);border-radius:var(--radius-lg);padding:1.4rem">
+        <div style="font-size:1.4rem;margin-bottom:.6rem">📊</div>
+        <h4 style="margin-bottom:.4rem">Progress Dashboard</h4>
+        <p style="font-size:.85rem;color:var(--text-dim)">Your attempt history, average scores and weak topics — all in one place.</p>
+      </div>
+
+      <div style="background:var(--navy-2);border:1px solid rgba(201,153,58,.1);border-radius:var(--radius-lg);padding:1.4rem">
+        <div style="font-size:1.4rem;margin-bottom:.6rem">🔗</div>
+        <h4 style="margin-bottom:.4rem">Combine Topics</h4>
+        <p style="font-size:.85rem;color:var(--text-dim)">Multi-chapter and multi-course CBT. Choose any question count you want.</p>
+      </div>
+
+    </div>
+  </div>
+
+  <footer class="site-footer">
+    <div class="footer-logo">FUTA <span>Online Class</span></div>
+    <div class="footer-rule"></div>
+    <div class="footer-tagline">Built for FUTA students, by a FUTA student.</div>
+    <div>© <span id="footer-year"></span> futaoc.name.ng · All rights reserved</div>
+  </footer>
+</div>
+
+
+<!-- ══════════════════════════════════════════════════════════
+     PAGE: LEVELS
+═══════════════════════════════════════════════════════════ -->
+<div class="page" id="page-levels">
+  <div class="page-header">
+    <div class="page-header-tag">Browse</div>
+    <h2>Select Your Level</h2>
+    <p>Choose your academic level to see available courses and start practising.</p>
+    <div class="page-header-rule"></div>
+  </div>
+  <div class="container">
+    <div style="margin-top:1.5rem">
+      <button class="back-btn" onclick="navigate('home')">
+        <i class="fa-solid fa-arrow-left"></i> Home
       </button>
+    </div>
+    <div class="level-grid" id="level-grid">
+      <!-- Rendered by app.js -->
     </div>
   </div>
 </div>
 
-<!-- PAGE: LEVELS -->
 
-<div class="page" id="page-levels">
-  <div class="page-header">
-    <button class="back-btn" onclick="navigate('home')">← Home</button>
-    <div class="page-header-tag">Academic Levels</div>
-    <h2>Select Your Level</h2>
-    <p>Choose an academic level to browse semesters, courses, and study materials.</p>
-    <div class="page-header-rule"></div>
-  </div>
-  <div class="container">
-    <div class="level-grid" id="level-grid"></div>
-  </div>
-</div>
-
-<!-- PAGE: LEVEL -->
-
+<!-- ══════════════════════════════════════════════════════════
+     PAGE: LEVEL (course listing)
+═══════════════════════════════════════════════════════════ -->
 <div class="page" id="page-level">
   <div class="page-header">
-    <button class="back-btn" onclick="navigate('levels')">← All Levels</button>
-    <div class="page-header-tag" id="level-tag"></div>
-    <h2 id="level-title"></h2>
+    <div class="page-header-tag" id="level-tag">Level</div>
+    <h2 id="level-title">Courses</h2>
     <p id="level-desc"></p>
     <div class="page-header-rule"></div>
   </div>
   <div class="container">
-    <div id="course-content"></div>
+    <div style="margin-top:1.5rem">
+      <button class="back-btn" id="course-back-btn" onclick="navigate('levels',true)">
+        <i class="fa-solid fa-arrow-left"></i> All Levels
+      </button>
+    </div>
+    <div id="course-content">
+      <!-- Rendered by app.js renderLevel() -->
+    </div>
   </div>
 </div>
 
-<!-- PAGE: COURSE -->
 
+<!-- ══════════════════════════════════════════════════════════
+     PAGE: COURSE (chapter listing)
+═══════════════════════════════════════════════════════════ -->
 <div class="page" id="page-course">
   <div class="page-header">
-    <button class="back-btn" id="course-back-btn">← Back to Courses</button>
     <div class="page-header-tag" id="course-tag"></div>
-    <h2 id="course-title"></h2>
+    <h2 id="course-title">Course</h2>
     <p id="course-desc"></p>
     <div class="page-header-rule"></div>
   </div>
   <div class="container">
-    <div id="chapter-content"></div>
+    <div style="margin-top:1.5rem">
+      <button class="back-btn" id="course-back-btn-2" onclick="navigate('level',true)">
+        <i class="fa-solid fa-arrow-left"></i> Back to Level
+      </button>
+    </div>
+    <div id="chapter-content">
+      <!-- Rendered by app.js renderCourse() -->
+    </div>
   </div>
 </div>
 
-<!-- PAGE: CHAPTER -->
 
+<!-- ══════════════════════════════════════════════════════════
+     PAGE: CHAPTER DETAIL
+═══════════════════════════════════════════════════════════ -->
 <div class="page" id="page-chapter">
   <div class="page-header">
-    <button class="back-btn" id="chapter-back-btn">← Back to Courses</button>
     <div class="page-header-tag" id="chapter-tag"></div>
-    <h2 id="chapter-title"></h2>
+    <h2 id="chapter-title">Chapter</h2>
     <div class="page-header-rule"></div>
   </div>
   <div class="container">
-    <div id="chapter-detail-content"></div>
-  </div>
-</div>
-
-<!-- CBT MODAL -->
-
-<div class="modal-overlay" id="cbt-modal">
-  <div class="modal">
-    <button class="modal-close" onclick="closeCBT()">✕</button>
-    <div class="modal-header">
-      <div class="modal-title" id="cbt-modal-title">CBT Practice</div>
-      <div class="modal-subtitle" id="cbt-modal-sub"></div>
+    <div style="margin-top:1.5rem">
+      <button class="back-btn" id="chapter-back-btn" onclick="navigate('course',true)">
+        <i class="fa-solid fa-arrow-left"></i> Back to Course
+      </button>
     </div>
-    <div id="cbt-body"></div>
+    <div id="chapter-detail-content">
+      <!-- Rendered by app.js renderChapter() -->
+    </div>
   </div>
 </div>
 
-<!-- ============================================================
-     FEEDBACK MODAL
-============================================================ -->
 
-<div class="extra-modal-overlay" id="feedback-modal">
-  <div class="extra-modal">
-    <button class="extra-modal-close" onclick="closeModal('feedback-modal')">✕</button>
-    <h2>💬 Send Feedback</h2>
-    <p class="modal-sub">We'd love to hear from you. Your message goes straight to our team.</p>
-    <div class="feedback-form" id="feedbackForm">
+<!-- ══════════════════════════════════════════════════════════
+     PAGE: STUDENT DASHBOARD
+═══════════════════════════════════════════════════════════ -->
+<div class="page" id="page-dashboard">
+  <div class="page-header">
+    <div class="page-header-tag">My Account</div>
+    <h2>My Dashboard</h2>
+    <p>Your attempt history, scores and progress.</p>
+    <div class="page-header-rule"></div>
+  </div>
+  <div class="container">
+    <div style="margin-top:1.5rem">
+      <button class="back-btn" onclick="navigate('home')">
+        <i class="fa-solid fa-arrow-left"></i> Home
+      </button>
+    </div>
+    <div id="dashboard-content">
+      <!-- Rendered by app.js renderDashboard() -->
+    </div>
+  </div>
+</div>
+
+
+<!-- ══════════════════════════════════════════════════════════
+     PAGE: ADMIN PANEL
+═══════════════════════════════════════════════════════════ -->
+<div class="page" id="page-admin">
+  <div class="page-header">
+    <div class="page-header-tag">Admin</div>
+    <h2>Admin Panel</h2>
+    <p>All students and CBT attempts across the portal.</p>
+    <div class="page-header-rule"></div>
+  </div>
+  <div class="container">
+    <div style="margin-top:1.5rem">
+      <button class="back-btn" onclick="navigate('home')">
+        <i class="fa-solid fa-arrow-left"></i> Home
+      </button>
+    </div>
+    <div id="admin-content">
+      <!-- Rendered by app.js renderAdmin() -->
+    </div>
+  </div>
+</div>
+
+
+<!-- ══════════════════════════════════════════════════════════
+     MODAL: CBT CONFIGURATOR
+     (Appears before every CBT session — choose mode, Q count, time)
+═══════════════════════════════════════════════════════════ -->
+<div class="modal-overlay" id="config-modal">
+  <div class="modal">
+    <button class="modal-close" onclick="document.getElementById('config-modal').classList.remove('active')">
+      <i class="fa-solid fa-xmark"></i>
+    </button>
+
+    <div class="modal-header">
+      <div class="modal-title" id="config-modal-title">Configure CBT Session</div>
+      <div class="modal-subtitle">Customise your session before you begin</div>
+    </div>
+
+    <div class="modal-body">
+
+      <!-- Mode tabs -->
+      <div class="mode-tabs">
+        <button class="mode-tab active" data-mode="practice">
+          <i class="fa-solid fa-graduation-cap" style="margin-right:.4rem"></i>
+          Practice CBT
+        </button>
+        <button class="mode-tab" data-mode="test">
+          <i class="fa-solid fa-stopwatch" style="margin-right:.4rem"></i>
+          Take Test
+        </button>
+      </div>
+
+      <!-- Question count -->
+      <div class="config-row">
+        <div class="config-label">
+          Number of questions
+          <span id="q-count-label">20</span>
+        </div>
+        <div class="q-preset-btns" id="q-preset-row">
+          <!-- Filled by app.js -->
+        </div>
+        <input type="range" class="portal-range" id="q-count-slider"
+          min="1" max="100" value="20" style="margin-top:.5rem" />
+      </div>
+
+      <!-- Time limit (hidden for Practice mode) -->
+      <div class="config-row" id="time-config-row" style="display:none">
+        <div class="config-label">Time limit</div>
+        <div class="time-preset-btns" id="time-preset-row">
+          <!-- Filled by app.js -->
+        </div>
+      </div>
+
+      <!-- Summary -->
+      <div class="config-summary-box" id="config-summary-box">
+        <!-- Filled by app.js -->
+      </div>
+
+      <button class="btn-start-cbt" onclick="launchCBTFromConfig()">
+        <i class="fa-solid fa-play"></i>
+        Start Session
+      </button>
+
+    </div>
+  </div>
+</div>
+
+
+<!-- ══════════════════════════════════════════════════════════
+     MODAL: CBT SESSION
+═══════════════════════════════════════════════════════════ -->
+<div class="modal-overlay" id="cbt-modal">
+  <div class="modal" style="max-width:720px">
+    <button class="modal-close" onclick="closeCBT()">
+      <i class="fa-solid fa-xmark"></i>
+    </button>
+    <div id="cbt-body">
+      <!-- Rendered by app.js startCBT() -->
+    </div>
+  </div>
+</div>
+
+
+<!-- ══════════════════════════════════════════════════════════
+     MODAL: AUTH (Sign In / Register)
+═══════════════════════════════════════════════════════════ -->
+<div class="modal-overlay" id="auth-modal">
+  <div class="modal" style="max-width:440px">
+    <button class="modal-close" onclick="closeAuthModal()">
+      <i class="fa-solid fa-xmark"></i>
+    </button>
+
+    <!-- Tabs -->
+    <div class="auth-tabs">
+      <button class="auth-tab active" data-tab="login"    onclick="switchAuthTab('login')">Sign In</button>
+      <button class="auth-tab"        data-tab="register" onclick="switchAuthTab('register')">Register</button>
+    </div>
+
+    <!-- ── LOGIN FORM ── -->
+    <div id="auth-login-form" class="auth-form">
       <div class="form-group">
-        <label>Your Name</label>
-        <input type="text" id="fb-name" placeholder="e.g. Adaeze Okonkwo" />
+        <label class="form-label" for="login-email">Email address</label>
+        <input class="form-input" type="email" id="login-email"
+          placeholder="you@example.com" autocomplete="email" />
       </div>
       <div class="form-group">
-        <label>Email Address</label>
-        <input type="email" id="fb-email" placeholder="your@email.com" />
+        <label class="form-label" for="login-password">Password</label>
+        <input class="form-input" type="password" id="login-password"
+          placeholder="••••••••" autocomplete="current-password"
+          onkeydown="if(event.key==='Enter')doLogin()" />
+      </div>
+      <div class="form-error" id="login-error"></div>
+      <button class="btn-full" id="login-btn" onclick="doLogin()">Sign In</button>
+      <button class="btn-guest" onclick="closeAuthModal()">
+        Continue as guest (results won't be saved)
+      </button>
+    </div>
+
+    <!-- ── REGISTER FORM ── -->
+    <div id="auth-register-form" class="auth-form" style="display:none">
+      <div class="form-group">
+        <label class="form-label" for="reg-name">Full name</label>
+        <input class="form-input" type="text" id="reg-name"
+          placeholder="e.g. Adeola Okonkwo" autocomplete="name" />
       </div>
       <div class="form-group">
-        <label>Feedback Type</label>
-        <select id="fb-type">
-          <option value="general">General Feedback</option>
-          <option value="bug">Bug / Error Report</option>
-          <option value="suggestion">Course Suggestion</option>
-          <option value="content">Content Correction</option>
-          <option value="praise">Appreciation 🙏</option>
+        <label class="form-label" for="reg-matric">Matric number</label>
+        <input class="form-input" type="text" id="reg-matric"
+          placeholder="e.g. FUTAmm/20/1234" autocomplete="off" />
+      </div>
+      <div class="form-group">
+        <label class="form-label" for="reg-level">Academic level</label>
+        <select class="form-input" id="reg-level">
+          <option value="" disabled selected>Select your level</option>
+          <option value="predegree">Pre-Degree</option>
+          <option value="uabs">UABS</option>
+          <option value="100l">100 Level</option>
+          <option value="200l">200 Level</option>
+          <option value="300l">300 Level</option>
+          <option value="400l">400 Level</option>
+          <option value="500l">500 Level</option>
         </select>
       </div>
       <div class="form-group">
-        <label>Your Message</label>
-        <textarea id="fb-message" placeholder="Tell us what you think, what to improve, or what's not working..."></textarea>
+        <label class="form-label" for="reg-email">Email address</label>
+        <input class="form-input" type="email" id="reg-email"
+          placeholder="you@example.com" autocomplete="email" />
       </div>
-      <div class="form-status" id="fb-status"></div>
-      <button class="form-submit" id="fb-submit" onclick="submitFeedback()">📨 Send Feedback</button>
+      <div class="form-group">
+        <label class="form-label" for="reg-password">Password</label>
+        <input class="form-input" type="password" id="reg-password"
+          placeholder="At least 6 characters" autocomplete="new-password"
+          onkeydown="if(event.key==='Enter')doRegister()" />
+      </div>
+      <div class="form-error" id="reg-error"></div>
+      <button class="btn-full" id="reg-btn" onclick="doRegister()">Create Account</button>
+      <button class="btn-guest" onclick="closeAuthModal()">
+        Continue as guest (results won't be saved)
+      </button>
     </div>
-  </div>
-</div>
-
-<!-- ============================================================
-     CONTACT (WHATSAPP) MODAL
-============================================================ -->
-
-<div class="extra-modal-overlay" id="contact-modal">
-  <div class="extra-modal">
-    <button class="extra-modal-close" onclick="closeModal('contact-modal')">✕</button>
-    <h2>📱 Contact Us</h2>
-    <p class="modal-sub">Reach us directly on WhatsApp for questions, collaborations, or support.</p>
-    <div class="wa-body">
-      <div class="wa-icon-wrap">💬</div>
-      <p class="wa-text">
-        Chat with the <strong>SmarTosh</strong> team on WhatsApp.<br/>
-        We typically reply within a few hours.
-      </p>
-      <div class="wa-number">+234 814 751 1138</div>
-      <a class="wa-open-btn" href="https://wa.me/2348147511138?text=Hello%20SmarTosh%2C%20I%20have%20a%20question%20about%20FUTA%20Online%20Class" target="_blank" rel="noopener">
-        <span>💬</span> Open WhatsApp
-      </a>
-    </div>
-  </div>
-</div>
-
-<!-- ============================================================
-     SUPPORT / BANK DETAILS MODAL
-============================================================ -->
-
-<div class="extra-modal-overlay" id="support-modal">
-  <div class="extra-modal">
-    <button class="extra-modal-close" onclick="closeModal('support-modal')">✕</button>
-    <h2>❤️ Support Us</h2>
-    <p class="modal-sub">FUTA Online Class is free for all students. Your support keeps it running and growing.</p>
-
-```
-<div class="bank-card">
-  <div class="bank-name-row">
-    <div class="bank-logo">🏦</div>
-    <div>
-      <div class="bank-title">Palmpay</div>
-      <div class="bank-subtitle">Bank Transfer</div>
-    </div>
-  </div>
-  <div class="bank-detail-row">
-    <span class="bank-detail-label">Account Name</span>
-    <span class="bank-detail-value">Oluwatosin Odejinmi</span>
-  </div>
-  <div class="bank-detail-row">
-    <span class="bank-detail-label">Account Number</span>
-    <span class="bank-detail-value">
-      8147511138
-      <button class="copy-btn" onclick="copyText('8147511138', this)">Copy</button>
-    </span>
-  </div>
-  <div class="bank-detail-row">
-    <span class="bank-detail-label">Bank</span>
-    <span class="bank-detail-value">Palmpay</span>
-  </div>
-</div>
-
-<p class="support-note">
-  Any amount is appreciated — even ₦100 helps! 🙏<br/>
-  Thank you for believing in free education.
-</p>
-```
 
   </div>
 </div>
 
-<!-- ============================================================
-     FLOATING ACTION BUTTONS
-============================================================ -->
 
-<div class="fab-group">
-  <div class="fab-mini-group" id="fabMiniGroup">
-    <button class="fab-mini fab-feedback" onclick="openModal('feedback-modal')">
-      💬 Send Feedback
-    </button>
-    <button class="fab-mini fab-contact" onclick="openModal('contact-modal')">
-      📱 Contact Us
-    </button>
-    <button class="fab-mini fab-support" onclick="openModal('support-modal')">
-      ❤️ Support Us
-    </button>
-  </div>
-  <button class="fab-main" id="fabMain" onclick="toggleFab()" title="More options">
-    ＋
-  </button>
-</div>
+<!-- ══════════════════════════════════════════════════════════
+     SCRIPTS
+     Load order: firebase.js → registry.js → courses → data.js → app.js
+═══════════════════════════════════════════════════════════ -->
 
-<!-- FOOTER -->
+<!-- 1. Firebase config (your credentials) -->
+<script src="firebase.js"></script>
 
-<footer class="site-footer">
-  <div class="footer-rule"></div>
-  <div class="footer-logo">FUTA <span>Online Class</span></div>
-  <div class="footer-tagline">Read · Revise · Ace — Built for FUTA Students</div>
-
-  <div class="footer-actions">
-    <button class="footer-action-btn" onclick="openModal('feedback-modal')">💬 Feedback</button>
-    <button class="footer-action-btn" onclick="openModal('contact-modal')">📱 Contact Us</button>
-    <button class="footer-action-btn" onclick="openModal('support-modal')">❤️ Support Us</button>
-  </div>
-
-  <div class="footer-credit">Created by <strong>SmarTosh</strong> &nbsp;·&nbsp; Powered by passion for education</div>
-</footer>
-
-<!-- ============================================================
-     COURSE DATA FILES
-============================================================ -->
-
+<!-- 2. Portal registry — defines window.PORTAL_INJECT -->
 <script src="registry.js"></script>
 
+<!-- 3. Course files — each calls PORTAL_INJECT({...}) -->
+<!-- 100 Level courses -->
 <script src="courses/mts101.js"></script>
-
-<script src="courses/ent301.js"></script>
-
-<script src="courses/bio102.js"></script>
-
-<script src="courses/mee102.js"></script>
-
-<script src="courses/che102.js"></script>
-
-<script src="courses/phy102.js"></script>
-
-<script src="courses/gns102.js"></script>
-
-<script src="courses/gns106.js"></script>
-
-<script src="courses/phy108.js"></script>
-
-<script src="courses/che104.js"></script>
-
-<script src="courses/bio104.js"></script>
-
 <script src="courses/mts102.js"></script>
-
 <script src="courses/mts104.js"></script>
-
 <script src="courses/csc102.js"></script>
-
 <script src="courses/eee102.js"></script>
+<script src="courses/phy102.js"></script>
+<script src="courses/phy108.js"></script>
+<script src="courses/che102.js"></script>
+<script src="courses/che104.js"></script>
+<script src="courses/bio102.js"></script>
+<script src="courses/bio104.js"></script>
+<script src="courses/gns102.js"></script>
+<script src="courses/gns106.js"></script>
+<script src="courses/mee102.js"></script>
+<!-- 300 Level courses -->
+<script src="courses/ent301.js"></script>
+<!-- Add more course files here as they are created -->
 
+<!-- 4. Data layer — builds LEVELS, COURSES, BY_LEVEL lookups -->
 <script src="data.js"></script>
 
+<!-- 5. App — navigation, CBT engine, auth, dashboard, admin -->
 <script src="app.js"></script>
 
-<!-- ============================================================
-     NEW FEATURE SCRIPTS
-============================================================ -->
-
 <script>
-/* ---- THEME SYSTEM ---- */
-const THEME_KEY = 'futa-theme';
-const themeIcons  = { light: '☀️', dark: '🌙', system: '🌐' };
-const themeLabels = { light: 'Light', dark: 'Dark', system: 'Auto' };
-
-function applyTheme(t) {
-  document.documentElement.setAttribute('data-theme', t);
-  document.getElementById('themeIcon').textContent  = themeIcons[t];
-  document.getElementById('themeLabel').textContent = themeLabels[t];
-  document.querySelectorAll('.theme-option').forEach((el, i) => {
-    el.classList.toggle('active', ['light','dark','system'][i] === t);
-  });
-}
-
-function setTheme(t) {
-  localStorage.setItem(THEME_KEY, t);
-  applyTheme(t);
-  closeThemeDropdown();
-}
-
-function toggleThemeDropdown() {
-  document.getElementById('themeDropdown').classList.toggle('open');
-}
-function closeThemeDropdown() {
-  document.getElementById('themeDropdown').classList.remove('open');
-}
-document.addEventListener('click', (e) => {
-  if (!e.target.closest('#themeToggleBtn') && !e.target.closest('#themeDropdown')) {
-    closeThemeDropdown();
-  }
-});
-
-// Init theme
-(function() {
-  const saved = localStorage.getItem(THEME_KEY) || 'system';
-  applyTheme(saved);
-})();
-
-/* ---- FAB GROUP ---- */
-let fabOpen = false;
-function toggleFab() {
-  fabOpen = !fabOpen;
-  document.getElementById('fabMiniGroup').classList.toggle('open', fabOpen);
-  document.getElementById('fabMain').textContent = fabOpen ? '✕' : '＋';
-}
-
-/* ---- MODAL HELPERS ---- */
-function openModal(id) {
-  document.getElementById(id).classList.add('open');
-  fabOpen = false;
-  document.getElementById('fabMiniGroup').classList.remove('open');
-  document.getElementById('fabMain').textContent = '＋';
-}
-function closeModal(id) {
-  document.getElementById(id).classList.remove('open');
-}
-// Close modal on overlay click
-document.querySelectorAll('.extra-modal-overlay').forEach(overlay => {
-  overlay.addEventListener('click', (e) => {
-    if (e.target === overlay) overlay.classList.remove('open');
-  });
-});
-// ESC key closes modals
-document.addEventListener('keydown', (e) => {
-  if (e.key === 'Escape') {
-    document.querySelectorAll('.extra-modal-overlay.open').forEach(m => m.classList.remove('open'));
-    closeThemeDropdown();
-  }
-});
-
-/* ---- COPY TO CLIPBOARD ---- */
-function copyText(text, btn) {
-  navigator.clipboard.writeText(text).then(() => {
-    const orig = btn.textContent;
-    btn.textContent = '✓ Copied';
-    btn.classList.add('copied');
-    setTimeout(() => {
-      btn.textContent = orig;
-      btn.classList.remove('copied');
-    }, 2000);
-  });
-}
-
-/* ---- FEEDBACK FORM (EmailJS / mailto fallback) ---- */
-function submitFeedback() {
-  const name    = document.getElementById('fb-name').value.trim();
-  const email   = document.getElementById('fb-email').value.trim();
-  const type    = document.getElementById('fb-type').value;
-  const message = document.getElementById('fb-message').value.trim();
-  const status  = document.getElementById('fb-status');
-  const btn     = document.getElementById('fb-submit');
-
-  status.className = 'form-status';
-  status.textContent = '';
-
-  if (!name)    { showStatus('error', '⚠️ Please enter your name.'); return; }
-  if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email))
-                { showStatus('error', '⚠️ Please enter a valid email address.'); return; }
-  if (!message) { showStatus('error', '⚠️ Please write your message.'); return; }
-
-  btn.disabled = true;
-  btn.textContent = '⏳ Sending…';
-
-  // Build mailto link as reliable fallback that works without a backend
-  const subject = encodeURIComponent(`[FUTA Feedback] ${type} — from ${name}`);
-  const body    = encodeURIComponent(
-    `Name: ${name}\nEmail: ${email}\nType: ${type}\n\nMessage:\n${message}`
-  );
-  const mailtoLink = `mailto:odejinmitosin1@gmail.com?subject=${subject}&body=${body}`;
-
-  // Small delay for UX feel, then open mail client
-  setTimeout(() => {
-    window.location.href = mailtoLink;
-    showStatus('success', '✅ Your mail client has opened! Press Send to deliver your feedback. Thank you, ' + name + '!');
-    btn.disabled = false;
-    btn.textContent = '📨 Send Feedback';
-    // Clear form
-    document.getElementById('fb-name').value    = '';
-    document.getElementById('fb-email').value   = '';
-    document.getElementById('fb-message').value = '';
-    document.getElementById('fb-type').value    = 'general';
-  }, 700);
-}
-
-function showStatus(type, msg) {
-  const el = document.getElementById('fb-status');
-  el.className = 'form-status ' + type;
-  el.textContent = msg;
-}
+  // Set footer year
+  document.getElementById('footer-year').textContent = new Date().getFullYear();
 </script>
-
-<!-- Statcounter -->
-
-<script type="text/javascript">
-var sc_project=13256945;
-var sc_invisible=1;
-var sc_security="8309914f";
-</script>
-
-<script type="text/javascript" src="https://www.statcounter.com/counter/counter.js" async></script>
-
-<noscript><div class="statcounter"><a title="Web Analytics" href="https://statcounter.com/" target="_blank"><img class="statcounter" src="https://c.statcounter.com/13256945/0/8309914f/1/" alt="Web Analytics" referrerPolicy="no-referrer-when-downgrade"></a></div></noscript>
 
 </body>
 </html>
