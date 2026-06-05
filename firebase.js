@@ -7,13 +7,13 @@
 // ── 1. YOUR FIREBASE CONFIG ──────────────────────────────────
 //  Go to: Firebase Console → Project Settings → Your Apps → Web App
 //  Copy the firebaseConfig object and paste it here:
-const FIREBASE_CONFIG = {
-  apiKey:            "PASTE_YOUR_API_KEY_HERE",
-  authDomain:        "PASTE_YOUR_AUTH_DOMAIN_HERE",
-  projectId:         "PASTE_YOUR_PROJECT_ID_HERE",
-  storageBucket:     "PASTE_YOUR_STORAGE_BUCKET_HERE",
-  messagingSenderId: "PASTE_YOUR_MESSAGING_SENDER_ID_HERE",
-  appId:             "PASTE_YOUR_APP_ID_HERE"
+const firebaseConfig = {
+  apiKey: "AIzaSyBYseL1Ihm0X6-HYmS71kAZryQeNFAZQJc",
+  authDomain: "futa-online-class.firebaseapp.com",
+  projectId: "futa-online-class",
+  storageBucket: "futa-online-class.firebasestorage.app",
+  messagingSenderId: "446592599827",
+  appId: "1:446592599827:web:c75fa6533499364f263ce6"
 };
 
 // ── 2. ADMIN UID ─────────────────────────────────────────────
