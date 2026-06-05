@@ -1,935 +1,1661 @@
-/**
- * app.js — FUTA Online Class Portal Engine
- * Supports three question types:
- *   mcq  — { text, options[], correct: 0-3, explanation }
- *   tf   — { type:"tf", text, correct: true/false, explanation }
- *   fitb — { type:"fitb", text, answer: "string", explanation }
- * Questions with no type field are treated as mcq.
- */
+// ============================================================
+//  app.js  —  FUTA Online Class
+//  Full rewrite: Phase 1 (CBT configurator, combining) +
+//                Phase 2 (Firebase auth, cloud storage,
+//                         dashboard, leaderboard, admin)
+//
+//  Load order:  firebase.js → registry.js → course files
+//               → data.js → [firebase SDK scripts] → app.js
+// ============================================================
 
-"use strict";
+'use strict';
 
-let state = { page: "home", levelId: null, semId: null, courseCode: null, chapterIdx: null };
-let cbtState = {};
-let activeSemTab = {};
-let cbtTimer = null;
+// ── FIREBASE INSTANCES (set after SDK loads) ──────────────────
+let _auth = null;
+let _db   = null;
+let _currentUser = null;   // Firebase User object or null
+let _userProfile = null;   // Firestore profile doc or null
 
-/* ─────────────────────────────────────────────────────────────────
-   ROUTING
-───────────────────────────────────────────────────────────────── */
-function navigate(page, levelId, courseCode, semId, chapterIdx) {
-  state = {
-    page,
-    levelId: levelId || null,
-    semId: semId || null,
-    courseCode: courseCode || null,
-    chapterIdx: chapterIdx != null ? chapterIdx : null
-  };
+// ── ROUTER STATE ──────────────────────────────────────────────
+let _state = {
+  level:   null,   // level id string
+  course:  null,   // course id string
+  chapter: null,   // chapter index (number)
+};
+
+// ── CBT SESSION STATE ─────────────────────────────────────────
+let _cbt = {
+  questions:    [],
+  current:      0,
+  answers:      [],   // { selected, correct }
+  mode:         'practice',   // 'practice' | 'test'
+  timeLimit:    0,    // seconds (0 = untimed)
+  timerHandle:  null,
+  timeLeft:     0,
+  sourceName:   '',   // e.g. "ENT 301 — Chapter 1"
+  sourceId:     '',   // used for leaderboard key
+};
+
+// ── COMBINE STATE ─────────────────────────────────────────────
+let _combineChapters = new Set();   // chapter indices (string "courseId-chIdx")
+let _combineCourses  = new Set();   // course ids
+let _combineMode     = false;
+
+// ============================================================
+//  FIREBASE INIT
+// ============================================================
+async function initFirebase() {
+  if (!window.FIREBASE_CONFIG || window.FIREBASE_CONFIG.apiKey === 'PASTE_YOUR_API_KEY_HERE') {
+    console.warn('[FUTA] firebase.js not configured — running without cloud features.');
+    return;
+  }
+  try {
+    const { initializeApp }        = await import('https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js');
+    const { getAuth, onAuthStateChanged, createUserWithEmailAndPassword,
+            signInWithEmailAndPassword, signOut }
+                                   = await import('https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js');
+    const { getFirestore, doc, getDoc, setDoc, addDoc, collection,
+            query, where, orderBy, limit, getDocs, serverTimestamp }
+                                   = await import('https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js');
+
+    const app = initializeApp(window.FIREBASE_CONFIG);
+    _auth = getAuth(app);
+    _db   = getFirestore(app);
+
+    // Attach helpers to avoid re-importing
+    window._fb = { createUserWithEmailAndPassword, signInWithEmailAndPassword, signOut,
+                   doc, getDoc, setDoc, addDoc, collection, query, where, orderBy,
+                   limit, getDocs, serverTimestamp };
+
+    onAuthStateChanged(_auth, async user => {
+      _currentUser = user;
+      if (user) {
+        const snap = await _fb.getDoc(_fb.doc(_db, 'users', user.uid));
+        _userProfile = snap.exists() ? snap.data() : null;
+      } else {
+        _userProfile = null;
+      }
+      renderNavAuth();
+    });
+  } catch (e) {
+    console.error('[FUTA] Firebase init error:', e);
+  }
+}
+
+// ============================================================
+//  BOOT
+// ============================================================
+document.addEventListener('DOMContentLoaded', async () => {
+  await initFirebase();
+  buildHeroStats();
+  bindNav();
+  handleHash();
+});
+
+window.addEventListener('popstate', handleHash);
+
+function handleHash() {
+  const h = location.hash.replace('#', '');
+  if (!h) { navigate('home'); return; }
+  const parts = h.split('/');
+  if (parts[0] === 'level' && parts[1]) {
+    _state.level = parts[1];
+    navigate('level');
+  } else if (parts[0] === 'course' && parts[1]) {
+    _state.course = parts[1];
+    navigate('course');
+  } else if (parts[0] === 'chapter' && parts[1]) {
+    _state.course  = parts[1];
+    _state.chapter = parseInt(parts[2], 10);
+    navigate('chapter');
+  } else {
+    navigate('home');
+  }
+}
+
+// ============================================================
+//  NAVIGATION
+// ============================================================
+function navigate(page, pushState = false) {
   document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
-  document.getElementById('page-' + page).classList.add('active');
-  updateBreadcrumb();
-  window.scrollTo({ top: 0, behavior: 'smooth' });
+  const el = document.getElementById('page-' + page);
+  if (!el) return;
+  el.classList.add('active');
 
-  if (page === 'home')    renderHome();
-  if (page === 'levels')  renderLevels();
-  if (page === 'level')   renderLevel(levelId);
-  if (page === 'course')  renderCourse(levelId, courseCode);
-  if (page === 'chapter') renderChapter(levelId, courseCode, chapterIdx);
+  if (pushState) {
+    history.pushState(null, '', '#' + buildHash(page));
+  }
 
-  // Update browser URL
-  if (page === 'home') {
-    history.pushState({}, '', '/');
-  } else if (page === 'levels') {
-    history.pushState({}, '', '/#levels');
-  } else if (page === 'level') {
-    history.pushState({}, '', '/#level/' + levelId);
-  } else if (page === 'course') {
-    history.pushState({}, '', '/#course/' + levelId + '/' + courseCode);
-  } else if (page === 'chapter') {
-    history.pushState({}, '', '/#chapter/' + levelId + '/' + courseCode + '/' + chapterIdx);
+  switch (page) {
+    case 'home':    renderHome();    break;
+    case 'levels':  renderLevels();  break;
+    case 'level':   renderLevel();   break;
+    case 'course':  renderCourse();  break;
+    case 'chapter': renderChapter(); break;
+    case 'dashboard': renderDashboard(); break;
+    case 'admin':   renderAdmin();   break;
+  }
+  window.scrollTo(0, 0);
+}
+window.navigate = navigate;
+
+function buildHash(page) {
+  switch (page) {
+    case 'level':   return `level/${_state.level}`;
+    case 'course':  return `course/${_state.course}`;
+    case 'chapter': return `chapter/${_state.course}/${_state.chapter}`;
+    default:        return '';
   }
 }
 
-function updateBreadcrumb() {
+function goLevel(levelId) {
+  _state.level = levelId;
+  _combineChapters.clear();
+  _combineCourses.clear();
+  _combineMode = false;
+  navigate('level', true);
+}
+window.goLevel = goLevel;
+
+function goCourse(courseId) {
+  _state.course = courseId;
+  _combineChapters.clear();
+  _combineMode = false;
+  navigate('course', true);
+}
+window.goCourse = goCourse;
+
+function goChapter(courseId, chIdx) {
+  _state.course  = courseId;
+  _state.chapter = chIdx;
+  navigate('chapter', true);
+}
+window.goChapter = goChapter;
+
+// ============================================================
+//  BREADCRUMB
+// ============================================================
+function setBreadcrumb(parts) {
   const bc = document.getElementById('breadcrumb');
-  const crumbs = [{ label: 'Home', page: 'home' }];
-
-  if (['levels', 'level', 'course', 'chapter'].includes(state.page)) {
-    crumbs.push({ label: 'Levels', page: 'levels' });
-  }
-
-  if (state.levelId) {
-    const lvl = PORTAL_DATA.levels.find(l => l.id === state.levelId);
-    if (lvl) crumbs.push({ label: lvl.name, page: 'level', levelId: state.levelId });
-  }
-
-  if (state.courseCode && state.levelId) {
-    const lvl = PORTAL_DATA.levels.find(l => l.id === state.levelId);
-    let course = null;
-    lvl?.semesters.forEach(s => {
-      const c = s.courses.find(c => c.code === state.courseCode);
-      if (c) course = c;
-    });
-    if (course) crumbs.push({ label: course.code, page: 'course', levelId: state.levelId, courseCode: state.courseCode });
-  }
-
-  if (state.chapterIdx != null && state.courseCode && state.levelId) {
-    const lvl = PORTAL_DATA.levels.find(l => l.id === state.levelId);
-    let chapter = null;
-    lvl?.semesters.forEach(s => {
-      const c = s.courses.find(c => c.code === state.courseCode);
-      if (c && c.chapters[state.chapterIdx]) chapter = c.chapters[state.chapterIdx];
-    });
-    if (chapter) crumbs.push({
-      label: 'Ch. ' + chapter.number + ' — ' + chapter.title,
-      page: 'chapter',
-      levelId: state.levelId,
-      courseCode: state.courseCode,
-      chapterIdx: state.chapterIdx
-    });
-  }
-
-  bc.innerHTML = crumbs.map((c, i) => {
-    const isLast = i === crumbs.length - 1;
-    if (isLast) return `<span class="crumb active">${c.label}</span>`;
-    return `<span class="crumb" onclick="navigate('${c.page}','${c.levelId||''}','${c.courseCode||''}',null,${c.chapterIdx != null ? c.chapterIdx : 'null'})"><span>${c.label}</span></span><span class="sep">/</span>`;
-  }).join('');
+  if (!bc) return;
+  bc.innerHTML = parts.map((p, i) =>
+    i === parts.length - 1
+      ? `<span>${p}</span>`
+      : `${p} <span style="margin:0 .3rem;opacity:.4">/</span>`
+  ).join('');
 }
 
-/* ─────────────────────────────────────────────────────────────────
-   HOME PAGE
-───────────────────────────────────────────────────────────────── */
-function renderHome() {
-  let totalCourses = 0, totalChapters = 0, totalQ = 0;
-  PORTAL_DATA.levels.forEach(l => {
-    l.semesters.forEach(s => {
-      s.courses.forEach(c => {
-        totalCourses++;
-        c.chapters.forEach(ch => {
-          totalChapters++;
-          totalQ += (ch.questions || []).length;
-        });
-      });
-    });
-  });
-
-  document.getElementById('hero-stats').innerHTML = `
-    <div class="stat"><div class="stat-num">${PORTAL_DATA.levels.length}</div><div class="stat-label">Levels</div></div>
-    <div class="stat"><div class="stat-num">${totalCourses}</div><div class="stat-label">Courses</div></div>
-    <div class="stat"><div class="stat-num">${totalChapters}</div><div class="stat-label">Chapters</div></div>
-    <div class="stat"><div class="stat-num">${totalQ}+</div><div class="stat-label">Practice Questions</div></div>
+// ============================================================
+//  HERO STATS
+// ============================================================
+function buildHeroStats() {
+  const courses  = Object.keys(window.COURSES || {}).length;
+  let   chapters = 0;
+  let   questions = 0;
+  for (const c of Object.values(window.COURSES || {})) {
+    chapters  += (c.chapters || []).length;
+    questions += window.courseQuestionCount(c);
+  }
+  const el = document.getElementById('hero-stats');
+  if (!el) return;
+  el.innerHTML = `
+    <div class="hero-stat"><span class="n">${courses}</span><span class="l">Courses</span></div>
+    <div class="hero-stat"><span class="n">${chapters}</span><span class="l">Chapters</span></div>
+    <div class="hero-stat"><span class="n">${questions.toLocaleString()}</span><span class="l">Questions</span></div>
   `;
 }
 
-/* ─────────────────────────────────────────────────────────────────
-   LEVELS PAGE
-───────────────────────────────────────────────────────────────── */
+// ============================================================
+//  HOME
+// ============================================================
+function renderHome() {
+  setBreadcrumb(['Home']);
+}
+
+// ============================================================
+//  LEVELS PAGE
+// ============================================================
 function renderLevels() {
+  setBreadcrumb(['Home', 'Levels']);
   const grid = document.getElementById('level-grid');
   if (!grid) return;
 
-  grid.innerHTML = PORTAL_DATA.levels.map(lvl => {
-    const totalCrs = lvl.semesters.reduce((sum, s) => sum + s.courses.length, 0);
-    const hasCourses = totalCrs > 0;
-    const semCount = lvl.semesters.length > 1 ? `${lvl.semesters.length} semesters` : '';
+  grid.innerHTML = window.LEVELS.map(lv => {
+    const courses   = (window.BY_LEVEL[lv.id] || []);
+    const courseCount = courses.length;
+    let qTotal = 0;
+    courses.forEach(c => { qTotal += window.courseQuestionCount(c); });
+
+    const accentMap = {
+      purple: '#7F77DD', blue: '#378ADD', teal: '#1D9E75',
+      amber: '#BA7517', coral: '#D85A30', pink: '#D4537E'
+    };
+    const accent = accentMap[lv.color] || '#c9993a';
+
     return `
-      <div class="level-card ${hasCourses ? '' : 'empty'}"
-           onclick="${hasCourses ? `navigate('level','${lvl.id}')` : 'void(0)'}">
-        <div class="level-badge">${lvl.name}</div>
-        <div class="level-name">${lvl.name}</div>
-        <div class="level-full">${lvl.fullName}</div>
-        <div class="level-footer">
-          ${hasCourses
-            ? `<span class="level-count">${totalCrs} course${totalCrs !== 1 ? 's' : ''}${semCount ? ' · ' + semCount : ''}</span>
-               <span class="level-arrow">→</span>`
-            : `<span class="coming-soon-tag">Coming Soon</span>`}
+      <div class="level-card" style="--level-accent:${accent}" onclick="goLevel('${lv.id}')">
+        <div class="level-card-label">${lv.label}</div>
+        <h3>${lv.fullName}</h3>
+        <p>${lv.desc}</p>
+        <div class="level-card-stats">
+          <span class="level-stat"><strong>${courseCount}</strong> course${courseCount !== 1 ? 's' : ''}</span>
+          ${qTotal > 0 ? `<span class="level-stat"><strong>${qTotal.toLocaleString()}</strong> questions</span>` : ''}
         </div>
       </div>`;
   }).join('');
 }
 
-/* ─────────────────────────────────────────────────────────────────
-   LEVEL PAGE
-───────────────────────────────────────────────────────────────── */
-function renderLevel(levelId) {
-  const lvl = PORTAL_DATA.levels.find(l => l.id === levelId);
-  if (!lvl) return;
+// ============================================================
+//  LEVEL PAGE (courses by semester)
+// ============================================================
+function renderLevel() {
+  const level = window.LEVELS.find(l => l.id === _state.level);
+  if (!level) { navigate('levels'); return; }
 
-  document.getElementById('level-tag').textContent = 'All Departments';
-  document.getElementById('level-title').textContent = lvl.fullName + ' — ' + lvl.name;
-  document.getElementById('level-desc').textContent = lvl.description;
+  setBreadcrumb(['Home', 'Levels', level.fullName]);
 
-  const container = document.getElementById('course-content');
-  const hasAnyCourses = lvl.semesters.some(s => s.courses.length > 0);
-  if (!hasAnyCourses) {
-    container.innerHTML = comingSoonBanner('This level', 'Courses are being prepared for this programme. Check back soon!');
+  const titleEl = document.getElementById('level-title');
+  const tagEl   = document.getElementById('level-tag');
+  const descEl  = document.getElementById('level-desc');
+  if (titleEl) titleEl.textContent = level.fullName;
+  if (tagEl)   tagEl.textContent   = level.label;
+  if (descEl)  descEl.textContent  = level.desc;
+
+  document.getElementById('course-back-btn') &&
+    (document.getElementById('course-back-btn').onclick = () => navigate('levels', true));
+
+  const courses = window.BY_LEVEL[level.id] || [];
+  const content = document.getElementById('course-content');
+  if (!content) return;
+
+  if (courses.length === 0) {
+    content.innerHTML = `
+      <div class="empty-state" style="padding-top:3rem">
+        <div class="icon">📚</div>
+        <p>No course content has been added for this level yet.<br>
+        Check back soon as we build it out.</p>
+      </div>`;
     return;
   }
 
-  const hasTabs = lvl.semesters.length > 1;
-  if (!activeSemTab[levelId]) activeSemTab[levelId] = lvl.semesters[0].id;
+  // Group by semester
+  const bySem = {};
+  courses.forEach(c => {
+    const s = c.semester || '1';
+    if (!bySem[s]) bySem[s] = [];
+    bySem[s].push(c);
+  });
 
   let html = '';
-  if (hasTabs) {
-    html += `<div class="semester-tabs" id="sem-tabs-${levelId}">`;
-    lvl.semesters.forEach(sem => {
-      const isActive = activeSemTab[levelId] === sem.id;
-      html += `<div class="sem-tab ${isActive ? 'active' : ''}" onclick="switchSem('${levelId}','${sem.id}')">${sem.name}</div>`;
-    });
-    html += `</div>`;
-  }
 
-  lvl.semesters.forEach(sem => {
-    const isActive = !hasTabs || activeSemTab[levelId] === sem.id;
-    html += `<div class="sem-panel ${isActive ? 'active' : ''}" id="sem-panel-${levelId}-${sem.id}">`;
-    if (!sem.courses.length) {
-      html += comingSoonBanner(sem.name, 'Courses for this semester are being prepared.');
-    } else {
-      html += `<div class="course-grid">`;
-      sem.courses.forEach(course => {
-        const hasChapters = course.chapters.length > 0;
-        html += `
-          <div class="course-card ${hasChapters ? '' : 'empty'}"
-            onclick="${hasChapters ? `navigate('course','${escQ(levelId)}','${escQ(course.code)}')` : 'void(0)'}">
-            <div class="course-code">${course.code}</div>
-            <div class="course-title">${course.title}</div>
-            <div class="course-meta">
-              ${hasChapters
-                ? `<span class="chapter-count">📖 ${course.chapters.length} chapter${course.chapters.length !== 1 ? 's' : ''}</span>
-                   <span class="course-arrow">→</span>`
-                : `<span class="coming-soon-tag">Coming soon</span>`}
-            </div>
-          </div>`;
-      });
-      html += `</div>`;
-    }
-    html += `</div>`;
-  });
-
-  container.innerHTML = html;
-}
-
-function switchSem(levelId, semId) {
-  activeSemTab[levelId] = semId;
-  const lvl = PORTAL_DATA.levels.find(l => l.id === levelId);
-  const tabContainer = document.getElementById(`sem-tabs-${levelId}`);
-  if (tabContainer) {
-    tabContainer.querySelectorAll('.sem-tab').forEach((tab, i) => {
-      tab.classList.toggle('active', lvl.semesters[i].id === semId);
-    });
-  }
-  lvl.semesters.forEach(sem => {
-    const panel = document.getElementById(`sem-panel-${levelId}-${sem.id}`);
-    if (panel) panel.classList.toggle('active', sem.id === semId);
-  });
-}
-
-/* ─────────────────────────────────────────────────────────────────
-   COURSE PAGE
-───────────────────────────────────────────────────────────────── */
-function renderCourse(levelId, courseCode) {
-  const lvl = PORTAL_DATA.levels.find(l => l.id === levelId);
-  let course = null, semName = '';
-  lvl?.semesters.forEach(s => {
-    const c = s.courses.find(c => c.code === courseCode);
-    if (c) { course = c; semName = s.name; }
-  });
-  if (!course) return;
-
-  document.getElementById('course-tag').textContent = lvl.name + ' · ' + semName + ' · ' + course.code;
-  document.getElementById('course-title').textContent = course.title;
-  document.getElementById('course-desc').textContent = course.description || '';
-  document.getElementById('course-back-btn').onclick = () => navigate('level', levelId);
-
-  const container = document.getElementById('chapter-content');
-  if (!course.chapters.length) {
-    container.innerHTML = comingSoonBanner(course.code, 'Chapter materials for this course are being prepared. Check back soon!');
-    return;
-  }
-
-  container.innerHTML = `<div class="chapter-list">${course.chapters.map((ch, idx) => `
-    <div class="chapter-item" onclick="navigate('chapter','${escQ(levelId)}','${escQ(courseCode)}',null,${idx})" style="cursor:pointer;">
-      <div class="chapter-header">
-        <div class="ch-num">${String(ch.number).padStart(2,'0')}</div>
-        <div class="ch-info">
-          <div class="ch-label">Chapter ${ch.number}</div>
-          <div class="ch-title">${ch.title}</div>
-        </div>
-        <div class="ch-toggle">→</div>
-      </div>
-    </div>`).join('')}
-  </div>`;
-}
-
-/* ─────────────────────────────────────────────────────────────────
-   CHAPTER PAGE
-───────────────────────────────────────────────────────────────── */
-function renderChapter(levelId, courseCode, chapterIdx) {
-  const lvl = PORTAL_DATA.levels.find(l => l.id === levelId);
-  let course = null, semName = '';
-  lvl?.semesters.forEach(s => {
-    const c = s.courses.find(c => c.code === courseCode);
-    if (c) { course = c; semName = s.name; }
-  });
-  if (!course) return;
-
-  const ch = course.chapters[chapterIdx];
-  if (!ch) return;
-
-  document.getElementById('chapter-tag').textContent = lvl.name + ' · ' + courseCode + ' · Chapter ' + ch.number;
-  document.getElementById('chapter-title').textContent = ch.title;
-  document.getElementById('chapter-back-btn').onclick = () => navigate('course', levelId, courseCode);
-
-  const container = document.getElementById('chapter-detail-content');
-  container.innerHTML = `
-    <div class="chapter-full">
-      ${ch.summary ? `<div class="ch-summary">${ch.summary}</div>` : ''}
-      ${ch.keyPoints && ch.keyPoints.length ? `
-        <div class="ch-keypoints">
-          <div class="ch-keypoints-title">Key Points</div>
-          <ul>${ch.keyPoints.map(kp => `<li>${kp}</li>`).join('')}</ul>
-        </div>` : ''}
-      <div class="ch-actions" style="margin-top:24px;">
-        ${ch.pdfUrl ? `<a class="btn btn-secondary" href="${ch.pdfUrl}" target="_blank" rel="noopener">📄 Read PDF</a>` : ''}
-        ${(ch.questions && ch.questions.length) ? `<button class="btn btn-primary" onclick="startCBT('${escQ(courseCode)}','${escQ(levelId)}',${chapterIdx}, false)">🎯 Practice CBT</button>` : ''}
-        ${(ch.questions && ch.questions.length) ? `<button class="btn btn-test" onclick="startCBT('${escQ(courseCode)}','${escQ(levelId)}',${chapterIdx}, true)">📝 Take Test</button>` : ''}
-        ${ch.cbtUrl ? `<a class="btn btn-ghost" href="${ch.cbtUrl}" target="_blank" rel="noopener">🔗 External CBT</a>` : ''}
-      </div>
-    </div>
-  `;
-}
-
-function toggleChapter(idx) {
-  document.getElementById('ch-' + idx).classList.toggle('open');
-}
-
-/* ─────────────────────────────────────────────────────────────────
-   CBT ENGINE
-───────────────────────────────────────────────────────────────── */
-function startCBT(courseCode, levelId, chapterIdx, isTest = false) {
-  const lvl = PORTAL_DATA.levels.find(l => l.id === levelId);
-  let chapter = null;
-  lvl?.semesters.forEach(s => {
-    const c = s.courses.find(c => c.code === courseCode);
-    if (c && c.chapters[chapterIdx]) chapter = c.chapters[chapterIdx];
-  });
-  if (!chapter || !chapter.questions.length) return;
-
-  const limit = chapter.questionLimit || chapter.questions.length;
-  const questions = shuffle([...chapter.questions]).slice(0, limit);
-
-  // For test mode: force a time limit (default 1 min/question if none set)
-  let timeLimitSecs = (chapter.timeLimit || 0) * 60;
-  if (isTest && timeLimitSecs === 0) timeLimitSecs = questions.length * 60;
-
-  cbtState = {
-    questions,
-    current: 0,
-    score: 0,
-    answered: false,
-    isTest,
-    userAnswers: new Array(questions.length).fill(null),
-    timeLimit: isTest ? timeLimitSecs : 0
-  };
-
-  if (isTest) {
-    document.getElementById('cbt-modal-title').textContent = `Chapter ${chapter.number} — Test`;
-    document.getElementById('cbt-modal-sub').textContent = chapter.title + ' · Timed Test';
-  } else {
-    document.getElementById('cbt-modal-title').textContent = `Chapter ${chapter.number} — CBT Practice`;
-    document.getElementById('cbt-modal-sub').textContent = chapter.title;
-  }
-  document.getElementById('cbt-modal').classList.add('open');
-  renderCBTQuestion();
-  clearInterval(cbtTimer);
-  if (cbtState.timeLimit > 0) {
-    cbtState.secondsLeft = cbtState.timeLimit;
-    startCBTTimer();
-  }
-}
-
-/* ─────────────────────────────────────────────────────────────────
-   QUESTION RENDERER — handles mcq, tf, fitb
-───────────────────────────────────────────────────────────────── */
-function renderCBTQuestion() {
-  const { questions, current, isTest } = cbtState;
-  const q = questions[current];
-  const total = questions.length;
-  const pct = (current / total * 100).toFixed(0);
-
-  /* Determine question type — default to mcq if no type field */
-  const qtype = q.type || 'mcq';
-
-  let bodyHTML = '';
-  if (qtype === 'tf') {
-    bodyHTML = renderTF();
-  } else if (qtype === 'fitb') {
-    bodyHTML = renderFITB(q);
-  } else {
-    bodyHTML = renderMCQ(q);
-  }
-
-  /* Question navigator — only in test mode */
-  const navHTML = isTest ? renderQuestionNav() : '';
-
-  document.getElementById('cbt-body').innerHTML = `
-    <div class="cbt-progress"><div class="cbt-progress-bar" style="width:${pct}%"></div></div>
-    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px;">
-      <div class="cbt-q-count">Question ${current + 1} of ${total}</div>
-      ${cbtState.timeLimit > 0
-        ? `<div id="cbt-timer" style="font-family:'JetBrains Mono',monospace;font-size:0.85rem;font-weight:600;color:var(--gold);background:rgba(201,146,26,0.1);border:1px solid rgba(201,146,26,0.3);padding:4px 12px;border-radius:4px;">--:--</div>`
-        : ''}
-    </div>
-    <div class="cbt-question">${q.text}</div>
-    ${bodyHTML}
-    <div class="cbt-feedback" id="cbt-feedback"></div>
-    ${navHTML}
-    <div class="cbt-nav">
-      ${isTest && current > 0
-        ? `<button class="btn btn-ghost cbt-prev-btn" onclick="prevCBTQuestion()">← Previous</button>`
-        : '<span></span>'}
-      <button class="btn btn-primary" id="cbt-next-btn"
-        ${!isTest ? 'style="display:none"' : ''}
-        onclick="${isTest ? 'saveAndNext()' : 'nextCBTQuestion()'}">
-        ${isTest
-          ? (current + 1 >= total ? '✔ Submit Test' : 'Save →')
-          : (current + 1 >= total ? 'See Results' : 'Next →')}
-      </button>
-    </div>
-  `;
-
-  cbtState.answered = false;
-
-  /* ── Restore test-mode selection after innerHTML is written ── */
-  if (isTest) {
-    const ua = cbtState.userAnswers[current];
-    if (ua) {
-      if (qtype === 'mcq') {
-        const btn = document.getElementById(`opt-${ua.chosen}`);
-        if (btn) btn.classList.add('test-selected');
-      } else if (qtype === 'tf') {
-        const idx = ua.chosen ? 0 : 1;
-        const btn = document.getElementById(`opt-${idx}`);
-        if (btn) btn.classList.add('test-selected');
-      } else if (qtype === 'fitb') {
-        const inp = document.getElementById('fitb-input');
-        if (inp) inp.value = ua.chosen || '';
-      }
-    }
-    /* Focus FITB input in test mode */
-    if (qtype === 'fitb') {
-      const inp = document.getElementById('fitb-input');
-      if (inp) inp.focus();
-    }
-  } else {
-    /* Practice mode: wire up FITB Enter key */
-    if (qtype === 'fitb') {
-      const inp = document.getElementById('fitb-input');
-      if (inp) {
-        inp.addEventListener('keydown', e => { if (e.key === 'Enter') submitFITB(); });
-        inp.focus();
-      }
-    }
-  }
-}
-
-/* ── MCQ renderer ── */
-function renderMCQ(q) {
-  return `
-    <div class="cbt-options">
-      ${q.options.map((opt, i) => `
-        <button class="cbt-option" id="opt-${i}" onclick="answerMCQ(${i})">${String.fromCharCode(65+i)}. ${opt}</button>
-      `).join('')}
-    </div>`;
-}
-
-/* ── True / False renderer ── */
-function renderTF() {
-  return `
-    <div class="cbt-options">
-      <button class="cbt-option" id="opt-0" onclick="answerTF(true)">A. True</button>
-      <button class="cbt-option" id="opt-1" onclick="answerTF(false)">B. False</button>
-    </div>`;
-}
-
-/* ── Fill-in-the-blank renderer ── */
-function renderFITB(q) {
-  const isTest = cbtState.isTest;
-  return `
-    <div class="cbt-fitb-wrap">
-      <input
-        type="text"
-        id="fitb-input"
-        class="cbt-fitb-input"
-        placeholder="${isTest ? 'Type your answer here…' : 'Type your answer and press Enter…'}"
-        autocomplete="off"
-        spellcheck="false"
-      />
-      ${!isTest ? `<button class="btn btn-primary cbt-fitb-btn" onclick="submitFITB()">Submit</button>` : ''}
-    </div>`;
-}
-
-/* ─────────────────────────────────────────────────────────────────
-   QUESTION NAVIGATOR (Test mode only)
-───────────────────────────────────────────────────────────────── */
-function renderQuestionNav() {
-  const { questions, current, userAnswers } = cbtState;
-  const boxes = questions.map((q, i) => {
-    let cls = 'qnav-box';
-    if (i === current) {
-      cls += ' qnav-current';
-    } else if (userAnswers[i] !== null) {
-      cls += ' qnav-answered';
-    } else if (i > current) {
-      cls += ' qnav-future';
-    } else {
-      cls += ' qnav-skipped';
-    }
-    return `<button class="${cls}" onclick="jumpToQuestion(${i})" title="Question ${i + 1}">${i + 1}</button>`;
-  }).join('');
-
-  return `
-    <div class="cbt-qnav-wrap">
-      <div class="cbt-qnav-label">
-        <span class="qnav-legend"><span class="qnav-dot answered"></span>Answered</span>
-        <span class="qnav-legend"><span class="qnav-dot skipped"></span>Skipped</span>
-        <span class="qnav-legend"><span class="qnav-dot future"></span>Remaining</span>
-      </div>
-      <div class="cbt-qnav" id="cbt-qnav">${boxes}</div>
-    </div>`;
-}
-
-/* Live-update the navigator without a full question re-render */
-function updateQuestionNav() {
-  const navEl = document.getElementById('cbt-qnav');
-  if (!navEl) return;
-  const { questions, current, userAnswers } = cbtState;
-  navEl.innerHTML = questions.map((q, i) => {
-    let cls = 'qnav-box';
-    if (i === current)                cls += ' qnav-current';
-    else if (userAnswers[i] !== null) cls += ' qnav-answered';
-    else if (i > current)             cls += ' qnav-future';
-    else                              cls += ' qnav-skipped';
-    return `<button class="${cls}" onclick="jumpToQuestion(${i})" title="Question ${i + 1}">${i + 1}</button>`;
-  }).join('');
-}
-
-/* ─────────────────────────────────────────────────────────────────
-   ANSWER HANDLERS
-───────────────────────────────────────────────────────────────── */
-
-/* MCQ */
-function answerMCQ(chosen) {
-  const q = cbtState.questions[cbtState.current];
-  const correct = q.correct;
-  const isCorrect = chosen === correct;
-
-  /* ── TEST MODE: green tick, allow re-selection, no lock ── */
-  if (cbtState.isTest) {
-    cbtState.userAnswers[cbtState.current] = { type: 'mcq', chosen, correct, isCorrect };
-    document.querySelectorAll('.cbt-option').forEach((btn, i) => {
-      btn.classList.remove('test-selected');
-      if (i === chosen) btn.classList.add('test-selected');
-    });
-    updateQuestionNav();
-    return;
-  }
-
-  /* ── PRACTICE MODE ── */
-  if (cbtState.answered) return;
-  cbtState.answered = true;
-  if (isCorrect) cbtState.score++;
-  cbtState.userAnswers[cbtState.current] = { type: 'mcq', chosen, correct, isCorrect };
-
-  document.querySelectorAll('.cbt-option').forEach((btn, i) => {
-    btn.disabled = true;
-    if (i === correct) btn.classList.add(isCorrect ? 'selected-correct' : 'reveal-correct');
-    if (i === chosen && !isCorrect) btn.classList.add('selected-wrong');
-  });
-  showFeedback(isCorrect,
-    isCorrect
-      ? `✅ Correct! ${q.explanation || ''}`
-      : `❌ Incorrect. Correct answer: <strong>${String.fromCharCode(65+correct)}. ${q.options[correct]}</strong>. ${q.explanation || ''}`
-  );
-}
-
-/* True / False */
-function answerTF(chosenBool) {
-  const q = cbtState.questions[cbtState.current];
-  const correctBool = q.correct;
-  const isCorrect = chosenBool === correctBool;
-
-  /* ── TEST MODE ── */
-  if (cbtState.isTest) {
-    cbtState.userAnswers[cbtState.current] = { type: 'tf', chosen: chosenBool, correct: correctBool, isCorrect };
-    const trueBtn  = document.getElementById('opt-0');
-    const falseBtn = document.getElementById('opt-1');
-    [trueBtn, falseBtn].forEach(b => b && b.classList.remove('test-selected'));
-    const selectedBtn = chosenBool ? trueBtn : falseBtn;
-    if (selectedBtn) selectedBtn.classList.add('test-selected');
-    updateQuestionNav();
-    return;
-  }
-
-  /* ── PRACTICE MODE ── */
-  if (cbtState.answered) return;
-  cbtState.answered = true;
-  if (isCorrect) cbtState.score++;
-  cbtState.userAnswers[cbtState.current] = { type: 'tf', chosen: chosenBool, correct: correctBool, isCorrect };
-
-  const trueBtn  = document.getElementById('opt-0');
-  const falseBtn = document.getElementById('opt-1');
-  [trueBtn, falseBtn].forEach(b => b && (b.disabled = true));
-
-  const correctBtn = correctBool ? trueBtn : falseBtn;
-  const chosenBtn  = chosenBool  ? trueBtn : falseBtn;
-  if (correctBtn) correctBtn.classList.add(isCorrect ? 'selected-correct' : 'reveal-correct');
-  if (!isCorrect && chosenBtn) chosenBtn.classList.add('selected-wrong');
-  showFeedback(isCorrect,
-    isCorrect
-      ? `✅ Correct! ${q.explanation || ''}`
-      : `❌ Incorrect. The correct answer is <strong>${correctBool ? 'True' : 'False'}</strong>. ${q.explanation || ''}`
-  );
-}
-
-/* Fill-in-the-blank — practice mode only (test mode uses saveAndNext) */
-function submitFITB() {
-  if (cbtState.answered) return;
-  const inp = document.getElementById('fitb-input');
-  if (!inp) return;
-
-  const userAnswer = inp.value.trim();
-  if (!userAnswer) {
-    inp.classList.add('fitb-shake');
-    setTimeout(() => inp.classList.remove('fitb-shake'), 600);
-    return;
-  }
-
-  cbtState.answered = true;
-  const q = cbtState.questions[cbtState.current];
-
-  const accepted = [q.answer.trim().toLowerCase()];
-  if (Array.isArray(q.acceptedAnswers)) {
-    q.acceptedAnswers.forEach(a => accepted.push(a.trim().toLowerCase()));
-  }
-
-  const isCorrect = accepted.includes(userAnswer.toLowerCase());
-  if (isCorrect) cbtState.score++;
-  cbtState.userAnswers[cbtState.current] = { type: 'fitb', chosen: userAnswer, correct: q.answer, isCorrect };
-
-  inp.disabled = true;
-  const btn = document.querySelector('.cbt-fitb-btn');
-  if (btn) btn.disabled = true;
-
-  inp.classList.add(isCorrect ? 'fitb-correct' : 'fitb-wrong');
-  showFeedback(isCorrect,
-    isCorrect
-      ? `✅ Correct! ${q.explanation || ''}`
-      : `❌ Incorrect. The correct answer is: <strong>${q.answer}</strong>. ${q.explanation || ''}`
-  );
-}
-
-/* Helper: save the current FITB answer in test mode without navigating */
-function _saveCurrentFITBIfTest() {
-  const { current, questions, isTest } = cbtState;
-  if (!isTest) return;
-  const q = questions[current];
-  if ((q.type || 'mcq') !== 'fitb') return;
-  const inp = document.getElementById('fitb-input');
-  if (!inp) return;
-  const userAnswer = inp.value.trim();
-  if (!userAnswer) return;
-  const accepted = [q.answer.trim().toLowerCase()];
-  if (Array.isArray(q.acceptedAnswers)) {
-    q.acceptedAnswers.forEach(a => accepted.push(a.trim().toLowerCase()));
-  }
-  cbtState.userAnswers[current] = {
-    type: 'fitb',
-    chosen: userAnswer,
-    correct: q.answer,
-    isCorrect: accepted.includes(userAnswer.toLowerCase())
-  };
-}
-
-/* Shared feedback display (practice mode) */
-function showFeedback(isCorrect, html) {
-  const fb = document.getElementById('cbt-feedback');
-  fb.className = 'cbt-feedback show ' + (isCorrect ? 'correct' : 'wrong');
-  fb.innerHTML = html;
-  document.getElementById('cbt-next-btn').style.display = 'inline-flex';
-}
-
-/* ─────────────────────────────────────────────────────────────────
-   TEST MODE NAVIGATION
-───────────────────────────────────────────────────────────────── */
-
-/* Save current question (incl. FITB) and advance to next, or submit */
-function saveAndNext() {
-  _saveCurrentFITBIfTest();
-  const { current, questions } = cbtState;
-  if (current + 1 >= questions.length) {
-    cbtState.score = cbtState.userAnswers.filter(a => a && a.isCorrect).length;
-    showCBTResults();
-  } else {
-    cbtState.current++;
-    renderCBTQuestion();
-  }
-}
-
-/* Go back to the previous question (saves FITB first) */
-function prevCBTQuestion() {
-  if (cbtState.current <= 0) return;
-  _saveCurrentFITBIfTest();
-  cbtState.current--;
-  renderCBTQuestion();
-}
-
-/* Jump directly to any question by index (saves FITB first) */
-function jumpToQuestion(idx) {
-  if (idx === cbtState.current) return;
-  _saveCurrentFITBIfTest();
-  cbtState.current = idx;
-  renderCBTQuestion();
-}
-
-/* ─────────────────────────────────────────────────────────────────
-   NAVIGATION & RESULTS
-───────────────────────────────────────────────────────────────── */
-function nextCBTQuestion() {
-  cbtState.current++;
-  if (cbtState.current >= cbtState.questions.length) showCBTResults();
-  else renderCBTQuestion();
-}
-
-function showCBTResults(timeExpired = false) {
-  clearInterval(cbtTimer);
-  const { questions, isTest, userAnswers } = cbtState;
-
-  if (isTest) {
-    _saveCurrentFITBIfTest();
-  }
-
-  const score = isTest
-    ? cbtState.userAnswers.filter(a => a && a.isCorrect).length
-    : cbtState.score;
-
-  const total = questions.length;
-  const pct = Math.round(score / total * 100);
-  const grade = pct >= 70 ? '🏆 Distinction!' : pct >= 50 ? '👍 Good Effort!' : '📚 Keep Studying!';
-
-  const timeMsg = timeExpired
-    ? `<div style="color:#c0392b;font-size:0.8rem;margin-bottom:12px;font-family:'Lora',serif;font-style:italic;">⏰ Time expired — test submitted automatically.</div>`
-    : '';
-
-  const reviewBtn = isTest
-    ? `<button class="btn btn-secondary" onclick="showTestReview()" style="margin-top:8px;width:100%;justify-content:center;">📋 Review Test</button>`
-    : '';
-
-  document.getElementById('cbt-body').innerHTML = `
-    <div class="cbt-score-screen">
-      ${timeMsg}
-      <div class="score-ring" style="--pct:${pct * 3.6}deg">
-        <div class="score-num">${pct}%</div>
-      </div>
-      <div class="score-label">${grade}</div>
-      <div class="score-sub">You scored ${score} out of ${total} questions.</div>
-      <div style="margin-top:26px;display:flex;gap:10px;justify-content:center;flex-wrap:wrap">
-        <button class="btn btn-primary" onclick="restartCBT()">🔄 Try Again</button>
-        <button class="btn btn-ghost" onclick="closeCBT()">Close</button>
-      </div>
-      ${reviewBtn}
-    </div>
-  `;
-}
-
-function showTestReview() {
-  const { questions, userAnswers } = cbtState;
-  let html = `<div class="test-review">
-    <div class="test-review-header">
-      <span style="font-family:'Playfair Display',serif;font-size:1.1rem;font-weight:700;color:var(--text);">Test Review</span>
-      <span style="font-size:0.75rem;color:var(--text-muted);font-family:'Lora',serif;font-style:italic;">All questions, your answers & explanations</span>
-    </div>`;
-
-  questions.forEach((q, idx) => {
-    const ua = userAnswers[idx];
-    const qtype = q.type || 'mcq';
-    const isCorrect = ua ? ua.isCorrect : false;
-    const statusIcon = ua ? (isCorrect ? '✅' : '❌') : '⬜';
-    const statusClass = ua ? (isCorrect ? 'review-correct' : 'review-wrong') : 'review-skipped';
-
-    let answerLine = '';
-    if (!ua) {
-      answerLine = `<div class="review-answer-row"><span class="review-label">Not answered</span></div>`;
-    } else if (qtype === 'mcq') {
-      const chosenLabel = `${String.fromCharCode(65 + ua.chosen)}. ${q.options[ua.chosen]}`;
-      const correctLabel = `${String.fromCharCode(65 + ua.correct)}. ${q.options[ua.correct]}`;
-      answerLine = `
-        <div class="review-answer-row">
-          <span class="review-label">Your answer:</span>
-          <span class="${isCorrect ? 'review-val-correct' : 'review-val-wrong'}">${chosenLabel}</span>
-        </div>
-        ${!isCorrect ? `<div class="review-answer-row">
-          <span class="review-label">Correct answer:</span>
-          <span class="review-val-correct">${correctLabel}</span>
-        </div>` : ''}`;
-    } else if (qtype === 'tf') {
-      answerLine = `
-        <div class="review-answer-row">
-          <span class="review-label">Your answer:</span>
-          <span class="${isCorrect ? 'review-val-correct' : 'review-val-wrong'}">${ua.chosen ? 'True' : 'False'}</span>
-        </div>
-        ${!isCorrect ? `<div class="review-answer-row">
-          <span class="review-label">Correct answer:</span>
-          <span class="review-val-correct">${ua.correct ? 'True' : 'False'}</span>
-        </div>` : ''}`;
-    } else if (qtype === 'fitb') {
-      answerLine = `
-        <div class="review-answer-row">
-          <span class="review-label">Your answer:</span>
-          <span class="${isCorrect ? 'review-val-correct' : 'review-val-wrong'}">${ua.chosen}</span>
-        </div>
-        ${!isCorrect ? `<div class="review-answer-row">
-          <span class="review-label">Correct answer:</span>
-          <span class="review-val-correct">${ua.correct}</span>
-        </div>` : ''}`;
-    }
-
+  // Course combine bar (only for allowCombine levels)
+  if (level.allowCombine && courses.length >= 2) {
     html += `
-      <div class="review-item ${statusClass}">
-        <div class="review-q-header">
-          <span class="review-q-num">${statusIcon} Q${idx + 1}</span>
-          <span class="review-q-text">${q.text}</span>
+      <div style="display:flex;align-items:center;gap:.8rem;margin-top:1.5rem;margin-bottom:.5rem;flex-wrap:wrap;">
+        <label style="display:flex;align-items:center;gap:.5rem;font-size:.82rem;color:var(--text-muted);cursor:pointer;">
+          <input type="checkbox" id="combine-courses-toggle" style="accent-color:var(--gold)"
+            onchange="toggleCombineCourseMode(this.checked)">
+          Combine courses for CBT
+        </label>
+        <span style="font-size:.75rem;color:var(--text-dim)">Select courses below, then launch combined CBT</span>
+      </div>`;
+  }
+
+  // Course combine launch bar
+  if (level.allowCombine) {
+    html += `
+      <div class="combine-bar" id="combine-courses-bar">
+        <div class="combine-bar-info">
+          <strong id="combine-courses-count">0 courses</strong> selected —
+          <span id="combine-courses-q-count">0 questions</span> available
         </div>
-        ${answerLine}
-        ${q.explanation ? `<div class="review-explanation"><span class="review-label">Explanation:</span> ${q.explanation}</div>` : ''}
+        <button class="btn-action btn-practice" onclick="launchCombinedCourseCBT('practice')">Practice CBT</button>
+        <button class="btn-action btn-test"     onclick="launchCombinedCourseCBT('test')">Take Test</button>
+      </div>`;
+  }
+
+  // Render courses grouped by semester
+  for (const [sem, semCourses] of Object.entries(bySem)) {
+    html += `<div class="semester-section">
+      <div class="semester-label">${window.SEMESTER_LABELS[sem] || `Semester ${sem}`}</div>
+      <div class="course-grid" id="course-grid-${sem}">`;
+
+    for (const c of semCourses) {
+      const qCount = window.courseQuestionCount(c);
+      const chCount = (c.chapters || []).length;
+      html += `
+        <div class="course-card" id="course-card-${c.id}" onclick="handleCourseCardClick(event,'${c.id}')">
+          <div class="combine-check-wrap" id="combine-check-wrap-${c.id}" style="display:none">
+            <input type="checkbox" class="combine-check" id="combine-check-${c.id}"
+              onclick="event.stopPropagation()"
+              onchange="toggleCourseSelect('${c.id}')">
+          </div>
+          <div class="course-card-code">${c.code || c.id.toUpperCase()}</div>
+          <h4>${c.title}</h4>
+          <div class="course-card-meta">
+            <span>${chCount} chapter${chCount !== 1 ? 's' : ''}</span>
+            <span>${qCount.toLocaleString()} questions</span>
+          </div>
+        </div>`;
+    }
+    html += `</div></div>`;
+  }
+
+  content.innerHTML = html;
+}
+window.renderLevel = renderLevel;
+
+function handleCourseCardClick(evt, courseId) {
+  if (_combineMode && evt.target.tagName !== 'INPUT') {
+    // Toggle checkbox via card click
+    const cb = document.getElementById('combine-check-' + courseId);
+    if (cb) { cb.checked = !cb.checked; toggleCourseSelect(courseId); }
+    return;
+  }
+  if (!_combineMode) goCourse(courseId);
+}
+window.handleCourseCardClick = handleCombineCourseCheckboxChange;
+
+function handleCombineCourseCheckboxChange(){}  // overridden below
+
+window.handleCourseCardClick = function(evt, courseId) {
+  if (_combineMode && evt.target.tagName !== 'INPUT') {
+    const cb = document.getElementById('combine-check-' + courseId);
+    if (cb) { cb.checked = !cb.checked; toggleCourseSelect(courseId); }
+    return;
+  }
+  if (!_combineMode) goCourse(courseId);
+};
+
+function toggleCombineCourseMode(on) {
+  _combineMode = on;
+  _combineCourses.clear();
+  document.querySelectorAll('[id^="combine-check-wrap-"]').forEach(el => {
+    el.style.display = on ? 'flex' : 'none';
+  });
+  document.querySelectorAll('[id^="course-card-"]').forEach(el => {
+    el.classList.toggle('combine-mode', on);
+  });
+  document.querySelectorAll('.combine-check').forEach(cb => { cb.checked = false; });
+  updateCombineCoursesBar();
+}
+window.toggleCombineCourseMode = toggleCombineCourseMode;
+
+function toggleCourseSelect(courseId) {
+  const cb = document.getElementById('combine-check-' + courseId);
+  if (!cb) return;
+  if (cb.checked) _combineCourses.add(courseId);
+  else            _combineCourses.delete(courseId);
+  updateCombineCoursesBar();
+}
+window.toggleCourseSelect = toggleCourseSelect;
+
+function updateCombineCoursesBar() {
+  const bar = document.getElementById('combine-courses-bar');
+  if (!bar) return;
+  const n = _combineCourses.size;
+  let qTotal = 0;
+  _combineCourses.forEach(cid => {
+    const c = window.COURSES[cid];
+    if (c) qTotal += window.courseQuestionCount(c);
+  });
+  document.getElementById('combine-courses-count').textContent =
+    `${n} course${n !== 1 ? 's' : ''}`;
+  document.getElementById('combine-courses-q-count').textContent =
+    `${qTotal.toLocaleString()} questions`;
+  bar.classList.toggle('visible', n >= 2);
+}
+
+function launchCombinedCourseCBT(defaultMode) {
+  if (_combineCourses.size < 2) return;
+  const chapters = [];
+  const names    = [];
+  _combineCourses.forEach(cid => {
+    const c = window.COURSES[cid];
+    if (c) {
+      (c.chapters || []).forEach(ch => chapters.push(ch));
+      names.push(c.code || c.title);
+    }
+  });
+  const sourceName = names.join(' + ');
+  const sourceId   = [..._combineCourses].sort().join('+');
+  openCBTConfigurator(chapters, sourceName, sourceId, defaultMode);
+}
+window.launchCombinedCourseCBT = launchCombinedCourseCBT;
+
+// ============================================================
+//  COURSE PAGE (chapters)
+// ============================================================
+function renderCourse() {
+  const course = window.COURSES[_state.course];
+  if (!course) { navigate('levels'); return; }
+
+  const level = window.LEVELS.find(l => l.id === course.level);
+  setBreadcrumb(['Home', 'Levels', level ? level.fullName : '...', course.code || course.title]);
+
+  const tagEl   = document.getElementById('course-tag');
+  const titleEl = document.getElementById('course-title');
+  const descEl  = document.getElementById('course-desc');
+  const backBtn = document.getElementById('course-back-btn');
+  if (tagEl)   tagEl.textContent   = course.code || '';
+  if (titleEl) titleEl.textContent = course.title;
+  if (descEl)  descEl.textContent  = course.description || '';
+  if (backBtn) backBtn.onclick = () => { navigate('level', true); };
+
+  _combineChapters.clear();
+  _combineMode = false;
+
+  const chapters = course.chapters || [];
+  const content  = document.getElementById('chapter-content');
+  if (!content) return;
+
+  if (chapters.length === 0) {
+    content.innerHTML = `<div class="empty-state"><div class="icon">📖</div><p>No chapters added yet.</p></div>`;
+    return;
+  }
+
+  const totalQ = window.courseQuestionCount(course);
+
+  let html = `
+    <div style="display:flex;align-items:center;gap:.8rem;margin-top:1.5rem;margin-bottom:.5rem;flex-wrap:wrap;">
+      <label style="display:flex;align-items:center;gap:.5rem;font-size:.82rem;color:var(--text-muted);cursor:pointer;">
+        <input type="checkbox" id="combine-chapters-toggle" style="accent-color:var(--gold)"
+          onchange="toggleCombineChapterMode(this.checked)">
+        Combine chapters for CBT
+      </label>
+      <span style="font-size:.75rem;color:var(--text-dim)">Select chapters below, then launch combined CBT</span>
+    </div>
+
+    <div class="combine-bar" id="combine-chapters-bar">
+      <div class="combine-bar-info">
+        <strong id="combine-ch-count">0 chapters</strong> selected —
+        <span id="combine-ch-q-count">0 questions</span> available
+      </div>
+      <button class="btn-action btn-practice" onclick="launchCombinedChapterCBT('practice')">Practice CBT</button>
+      <button class="btn-action btn-test"     onclick="launchCombinedChapterCBT('test')">Take Test</button>
+    </div>
+
+    <div class="chapter-list" style="margin-top:1rem;">`;
+
+  chapters.forEach((ch, idx) => {
+    const qCount = window.chapterQuestionCount(ch);
+    html += `
+      <div class="chapter-row" id="chapter-row-${idx}">
+        <div class="chapter-row-head" onclick="handleChapterRowClick(event, '${course.id}', ${idx})">
+          <div class="chapter-combine-check-wrap" id="ch-check-wrap-${idx}" style="display:none">
+            <input type="checkbox" class="combine-check" id="ch-check-${idx}"
+              onclick="event.stopPropagation()"
+              onchange="toggleChapterSelect(${idx})">
+          </div>
+          <div class="chapter-num">Ch.${idx + 1}</div>
+          <h4>${ch.title}</h4>
+          <div class="chapter-q-count">${qCount} Qs</div>
+        </div>
+        <div class="chapter-actions" id="ch-actions-${idx}" style="display:none">
+          <button class="btn-action btn-read"     onclick="goChapter('${course.id}',${idx})">Read Notes</button>
+          <button class="btn-action btn-practice" onclick="openChapterCBT('${course.id}',${idx},'practice')">Practice CBT</button>
+          <button class="btn-action btn-test"     onclick="openChapterCBT('${course.id}',${idx},'test')">Take Test</button>
+        </div>
       </div>`;
   });
 
-  html += `
-    <div style="margin-top:20px;display:flex;gap:10px;justify-content:center;flex-wrap:wrap">
-      <button class="btn btn-primary" onclick="restartCBT()">🔄 Try Again</button>
-      <button class="btn btn-ghost" onclick="closeCBT()">Close</button>
-    </div>
-  </div>`;
+  html += `</div>
 
-  document.getElementById('cbt-body').innerHTML = html;
+    <div style="margin-top:1.5rem;display:flex;gap:.75rem;flex-wrap:wrap">
+      <button class="btn-action btn-practice" onclick="openCourseCBT('${course.id}','practice')">
+        Practice Full Course (${totalQ} Qs)
+      </button>
+      <button class="btn-action btn-test" onclick="openCourseCBT('${course.id}','test')">
+        Take Full Course Test
+      </button>
+    </div>`;
+
+  content.innerHTML = html;
 }
 
-function restartCBT() {
-  clearInterval(cbtTimer);
-  cbtState.current = 0;
-  cbtState.score = 0;
-  cbtState.answered = false;
-  cbtState.secondsLeft = cbtState.timeLimit;
-  cbtState.questions = shuffle([...cbtState.questions]);
-  cbtState.userAnswers = new Array(cbtState.questions.length).fill(null);
-  renderCBTQuestion();
-  if (cbtState.timeLimit > 0) startCBTTimer();
-}
-
-function closeCBT() {
-  clearInterval(cbtTimer);
-  document.getElementById('cbt-modal').classList.remove('open');
-}
-
-/* ─────────────────────────────────────────────────────────────────
-   UTILITIES
-───────────────────────────────────────────────────────────────── */
-function comingSoonBanner(name, msg) {
-  return `<div class="coming-soon-banner">
-    <span class="icon">📜</span>
-    <h3>Coming Soon</h3>
-    <p>${msg || name + ' materials are being prepared.'}</p>
-  </div>`;
-}
-
-function shuffle(arr) {
-  for (let i = arr.length - 1; i > 0; i--) {
-    const j = Math.floor(Math.random() * (i + 1));
-    [arr[i], arr[j]] = [arr[j], arr[i]];
+window.handleChapterRowClick = function(evt, courseId, idx) {
+  if (_combineMode && evt.target.tagName !== 'INPUT') {
+    const cb = document.getElementById('ch-check-' + idx);
+    if (cb) { cb.checked = !cb.checked; toggleChapterSelect(idx); }
+    return;
   }
-  return arr;
+  if (!_combineMode) {
+    const actions = document.getElementById('ch-actions-' + idx);
+    if (actions) {
+      const open = actions.style.display === 'flex';
+      // close all
+      document.querySelectorAll('[id^="ch-actions-"]').forEach(a => a.style.display = 'none');
+      if (!open) actions.style.display = 'flex';
+    }
+  }
+};
+
+function toggleCombineChapterMode(on) {
+  _combineMode = on;
+  _combineChapters.clear();
+  document.querySelectorAll('[id^="ch-check-wrap-"]').forEach(el => {
+    el.style.display = on ? 'flex' : 'none';
+  });
+  document.querySelectorAll('[id^="chapter-row-"]').forEach(el => {
+    el.classList.toggle('combine-mode', on);
+  });
+  document.querySelectorAll('.combine-check').forEach(cb => { cb.checked = false; });
+  updateCombineChaptersBar();
+}
+window.toggleCombineChapterMode = toggleCombineChapterMode;
+
+function toggleChapterSelect(idx) {
+  const cb = document.getElementById('ch-check-' + idx);
+  if (!cb) return;
+  const key = `${_state.course}-${idx}`;
+  if (cb.checked) _combineChapters.add(key);
+  else            _combineChapters.delete(key);
+  updateCombineChaptersBar();
+}
+window.toggleChapterSelect = toggleChapterSelect;
+
+function updateCombineChaptersBar() {
+  const bar = document.getElementById('combine-chapters-bar');
+  if (!bar) return;
+  const course = window.COURSES[_state.course];
+  const n = _combineChapters.size;
+  let qTotal = 0;
+  _combineChapters.forEach(key => {
+    const idx = parseInt(key.split('-').pop(), 10);
+    const ch  = course && course.chapters && course.chapters[idx];
+    if (ch) qTotal += window.chapterQuestionCount(ch);
+  });
+  document.getElementById('combine-ch-count').textContent = `${n} chapter${n !== 1 ? 's' : ''}`;
+  document.getElementById('combine-ch-q-count').textContent = `${qTotal.toLocaleString()} questions`;
+  bar.classList.toggle('visible', n >= 2);
 }
 
-function escQ(str) {
-  return (str || '').replace(/'/g, "\\'");
+function launchCombinedChapterCBT(defaultMode) {
+  const course = window.COURSES[_state.course];
+  if (!course || _combineChapters.size < 2) return;
+  const chapters = [];
+  const chNums   = [];
+  _combineChapters.forEach(key => {
+    const idx = parseInt(key.split('-').pop(), 10);
+    const ch  = course.chapters[idx];
+    if (ch) { chapters.push(ch); chNums.push(idx + 1); }
+  });
+  chNums.sort((a, b) => a - b);
+  const sourceName = `${course.code || course.title} — Chapters ${chNums.join(', ')}`;
+  const sourceId   = `${course.id}_ch_${chNums.join('_')}`;
+  openCBTConfigurator(chapters, sourceName, sourceId, defaultMode);
+}
+window.launchCombinedChapterCBT = launchCombinedChapterCBT;
+
+function openChapterCBT(courseId, chIdx, defaultMode) {
+  const course = window.COURSES[courseId];
+  if (!course) return;
+  const ch = course.chapters[chIdx];
+  if (!ch) return;
+  const sourceName = `${course.code || course.title} — ${ch.title}`;
+  const sourceId   = `${courseId}_ch${chIdx}`;
+  openCBTConfigurator([ch], sourceName, sourceId, defaultMode);
+}
+window.openChapterCBT = openChapterCBT;
+
+function openCourseCBT(courseId, defaultMode) {
+  const course = window.COURSES[courseId];
+  if (!course) return;
+  const sourceName = `${course.code || course.title} — Full Course`;
+  const sourceId   = `${courseId}_full`;
+  openCBTConfigurator(course.chapters || [], sourceName, sourceId, defaultMode);
+}
+window.openCourseCBT = openCourseCBT;
+
+// ============================================================
+//  CHAPTER DETAIL PAGE
+// ============================================================
+function renderChapter() {
+  const course = window.COURSES[_state.course];
+  if (!course) { navigate('levels'); return; }
+  const ch = (course.chapters || [])[_state.chapter];
+  if (!ch) { navigate('course', true); return; }
+
+  const level = window.LEVELS.find(l => l.id === course.level);
+  setBreadcrumb(['Home', 'Levels', level ? level.label : '...', course.code, `Ch.${_state.chapter + 1}`]);
+
+  const tagEl   = document.getElementById('chapter-tag');
+  const titleEl = document.getElementById('chapter-title');
+  const backBtn = document.getElementById('chapter-back-btn');
+  if (tagEl)   tagEl.textContent   = `${course.code || course.id.toUpperCase()} — Chapter ${_state.chapter + 1}`;
+  if (titleEl) titleEl.textContent = ch.title;
+  if (backBtn) backBtn.onclick = () => navigate('course', true);
+
+  const qCount = window.chapterQuestionCount(ch);
+  const content = document.getElementById('chapter-detail-content');
+  if (!content) return;
+
+  let keyPointsHtml = '';
+  if (ch.keyPoints && ch.keyPoints.length) {
+    keyPointsHtml = `
+      <div class="summary-section">
+        <h4>Key Points</h4>
+        <ul class="key-points-list">
+          ${ch.keyPoints.map(p => `<li>${p}</li>`).join('')}
+        </ul>
+      </div>`;
+  }
+
+  content.innerHTML = `
+    <div class="chapter-detail-header" style="margin-top:1.5rem">
+      <h3>${ch.title}</h3>
+      <p>${qCount} practice questions available</p>
+      <div class="chapter-cbt-bar">
+        <button class="btn-action btn-practice" onclick="openChapterCBT('${course.id}',${_state.chapter},'practice')">
+          Practice CBT
+        </button>
+        <button class="btn-action btn-test" onclick="openChapterCBT('${course.id}',${_state.chapter},'test')">
+          Take Test
+        </button>
+      </div>
+    </div>
+
+    <div class="summary-section" style="margin-top:1.5rem">
+      <h4>Chapter Summary</h4>
+      ${(ch.summary || 'Summary coming soon.').split('\n\n').map(p =>
+        `<p>${p.trim()}</p>`).join('')}
+    </div>
+
+    ${keyPointsHtml}
+  `;
 }
 
-function startCBTTimer() {
-  updateTimerDisplay();
-  cbtTimer = setInterval(() => {
-    cbtState.secondsLeft--;
-    updateTimerDisplay();
-    if (cbtState.secondsLeft <= 0) {
-      clearInterval(cbtTimer);
-      showCBTResults(true);
+// ============================================================
+//  CBT CONFIGURATOR MODAL
+// ============================================================
+function openCBTConfigurator(chapters, sourceName, sourceId, defaultMode) {
+  let totalQ = 0;
+  chapters.forEach(ch => { totalQ += (ch.questions || []).length; });
+
+  if (totalQ === 0) {
+    showToast('No questions available for this selection.', 'error');
+    return;
+  }
+
+  const modal = document.getElementById('config-modal');
+  if (!modal) return;
+
+  // Store for launch
+  modal._chapters   = chapters;
+  modal._sourceName = sourceName;
+  modal._sourceId   = sourceId;
+  modal._totalQ     = totalQ;
+  modal._mode       = defaultMode || 'practice';
+
+  // Populate title
+  document.getElementById('config-modal-title').textContent = sourceName;
+
+  // Mode tabs
+  const tabs = document.querySelectorAll('.mode-tab');
+  tabs.forEach(t => {
+    t.classList.toggle('active', t.dataset.mode === modal._mode);
+    t.onclick = () => {
+      modal._mode = t.dataset.mode;
+      tabs.forEach(x => x.classList.toggle('active', x === t));
+      updateConfigTime();
+      updateConfigSummary();
+    };
+  });
+
+  // Q-count presets
+  const presets   = [10, 20, 40];
+  const presetRow = document.getElementById('q-preset-row');
+  let   selectedQ = Math.min(20, totalQ);
+  if (presetRow) {
+    presetRow.innerHTML = presets.map(n =>
+      n <= totalQ
+        ? `<button class="q-preset${selectedQ === n ? ' active' : ''}" data-q="${n}"
+             onclick="setQPreset(${n})">${n}</button>`
+        : ''
+    ).join('') +
+      `<button class="q-preset${selectedQ === totalQ ? ' active' : ''}" data-q="${totalQ}"
+         onclick="setQPreset(${totalQ})">All (${totalQ})</button>`;
+  }
+
+  const qSlider = document.getElementById('q-count-slider');
+  const qLabel  = document.getElementById('q-count-label');
+  if (qSlider) {
+    qSlider.max   = totalQ;
+    qSlider.value = selectedQ;
+    qSlider.oninput = () => {
+      const v = parseInt(qSlider.value);
+      if (qLabel) qLabel.textContent = v;
+      modal._selectedQ = v;
+      document.querySelectorAll('.q-preset').forEach(b => {
+        b.classList.toggle('active', parseInt(b.dataset.q) === v);
+      });
+      updateConfigTime();
+      updateConfigSummary();
+    };
+  }
+  if (qLabel) qLabel.textContent = selectedQ;
+  modal._selectedQ = selectedQ;
+
+  // Time presets
+  updateConfigTime();
+  updateConfigSummary();
+
+  modal.classList.add('active');
+}
+window.openCBTConfigurator = openCBTConfigurator;
+
+window.setQPreset = function(n) {
+  const modal = document.getElementById('config-modal');
+  modal._selectedQ = n;
+  const slider = document.getElementById('q-count-slider');
+  const label  = document.getElementById('q-count-label');
+  if (slider) slider.value = n;
+  if (label)  label.textContent = n;
+  document.querySelectorAll('.q-preset').forEach(b => {
+    b.classList.toggle('active', parseInt(b.dataset.q) === n);
+  });
+  updateConfigTime();
+  updateConfigSummary();
+};
+
+function updateConfigTime() {
+  const modal      = document.getElementById('config-modal');
+  const timeRow    = document.getElementById('time-config-row');
+  const isPractice = modal && modal._mode === 'practice';
+  if (timeRow) timeRow.style.display = isPractice ? 'none' : 'block';
+  if (!modal) return;
+
+  const q       = modal._selectedQ || 20;
+  const defMins = window.defaultTime(q);
+  const presets = [10, 20, 30, 45, 60];
+  const selected = modal._selectedTime || defMins;
+  modal._selectedTime = selected;
+
+  const timeRow2 = document.getElementById('time-preset-row');
+  if (timeRow2) {
+    timeRow2.innerHTML =
+      `<button class="time-preset${selected === defMins ? ' active' : ''}" data-t="${defMins}"
+         onclick="setTimePreset(${defMins})">Default (${defMins} min)</button>` +
+      presets.filter(t => t !== defMins).map(t =>
+        `<button class="time-preset${selected === t ? ' active' : ''}" data-t="${t}"
+           onclick="setTimePreset(${t})">${t} min</button>`
+      ).join('');
+  }
+}
+
+window.setTimePreset = function(mins) {
+  const modal = document.getElementById('config-modal');
+  if (!modal) return;
+  modal._selectedTime = mins;
+  document.querySelectorAll('.time-preset').forEach(b => {
+    b.classList.toggle('active', parseInt(b.dataset.t) === mins);
+  });
+  updateConfigSummary();
+};
+
+function updateConfigSummary() {
+  const modal = document.getElementById('config-modal');
+  if (!modal) return;
+  const q    = modal._selectedQ || 20;
+  const mode = modal._mode || 'practice';
+  const time = modal._selectedTime || window.defaultTime(q);
+  const box  = document.getElementById('config-summary-box');
+  if (!box) return;
+  const timeStr = mode === 'practice' ? '<strong>Untimed</strong>' : `<strong>${time} minutes</strong>`;
+  box.innerHTML = `
+    <strong>${q}</strong> questions · ${timeStr} ·
+    ${mode === 'practice' ? '<strong>Practice</strong> (instant feedback)' : '<strong>Take Test</strong> (review at end)'}
+    <br>Source: ${modal._sourceName}
+  `;
+}
+
+window.launchCBTFromConfig = function() {
+  const modal = document.getElementById('config-modal');
+  if (!modal || !modal._chapters) return;
+  modal.classList.remove('active');
+
+  const mode    = modal._mode || 'practice';
+  const q       = modal._selectedQ || modal._totalQ;
+  const timeMins = mode === 'test' ? (modal._selectedTime || window.defaultTime(q)) : 0;
+
+  startCBT(modal._chapters, mode, q, timeMins * 60, modal._sourceName, modal._sourceId);
+};
+
+// ============================================================
+//  CBT ENGINE
+// ============================================================
+function startCBT(chapters, mode, qLimit, timeSecs, sourceName, sourceId) {
+  const questions = window.poolQuestions(chapters, qLimit);
+  if (questions.length === 0) { showToast('No questions available.', 'error'); return; }
+
+  _cbt = {
+    questions,
+    current:     0,
+    answers:     new Array(questions.length).fill(null),
+    mode,
+    timeLimit:   timeSecs,
+    timerHandle: null,
+    timeLeft:    timeSecs,
+    sourceName,
+    sourceId,
+  };
+
+  renderCBTQuestion();
+  document.getElementById('cbt-modal').classList.add('active');
+
+  if (mode === 'test' && timeSecs > 0) startTimer();
+}
+
+function renderCBTQuestion() {
+  const body = document.getElementById('cbt-body');
+  if (!body) return;
+
+  const { questions, current, mode, timeLeft, timeLimit } = _cbt;
+  const q     = questions[current];
+  const total = questions.length;
+  const pct   = Math.round((current / total) * 100);
+
+  // Timer display
+  const timerHtml = (mode === 'test' && timeLimit > 0)
+    ? `<div class="cbt-timer${timeLeft < 60 ? ' danger' : ''}" id="cbt-timer-display">
+         ⏱ ${formatTime(timeLeft)}
+       </div>`
+    : '';
+
+  const keys = ['A', 'B', 'C', 'D', 'E'];
+
+  let questionHtml = '';
+  const existingAnswer = _cbt.answers[current];
+
+  if (q.type === 'fillin') {
+    questionHtml = `
+      <input type="text" class="cbt-fillin-input" id="fillin-input"
+        placeholder="Type your answer…"
+        value="${existingAnswer && existingAnswer.text ? existingAnswer.text : ''}"
+        onkeydown="if(event.key==='Enter')submitAnswer()">`;
+  } else {
+    // MCQ or True/False
+    const opts = q.type === 'truefalse' ? ['True', 'False'] : (q.options || []);
+    questionHtml = `<div class="cbt-options">` +
+      opts.map((opt, i) => {
+        let cls = 'cbt-option';
+        if (existingAnswer !== null) {
+          if (mode === 'practice') {
+            if (i === existingAnswer.selected) {
+              cls += existingAnswer.correct ? ' correct' : ' wrong';
+            }
+            if (!existingAnswer.correct && String(i) === String(existingAnswer.correctIdx)) {
+              cls += ' reveal-correct';
+            }
+          } else {
+            if (i === existingAnswer.selected) cls += ' selected';
+          }
+        }
+        return `<div class="${cls}" onclick="selectOption(${i})">
+          <span class="cbt-option-key">${keys[i] || i}</span>
+          <span>${opt}</span>
+        </div>`;
+      }).join('') +
+    `</div>`;
+  }
+
+  // Feedback box (practice mode only, shown after answering)
+  let feedbackHtml = '';
+  if (mode === 'practice' && existingAnswer !== null) {
+    const isCorrect = existingAnswer.correct;
+    feedbackHtml = `
+      <div class="cbt-feedback visible ${isCorrect ? 'correct-fb' : 'wrong-fb'}">
+        ${isCorrect ? '✓ Correct!' : `✗ Incorrect. Correct answer: <strong>${existingAnswer.correctAnswer}</strong>`}
+        ${q.explanation ? `<br><em>${q.explanation}</em>` : ''}
+      </div>`;
+  }
+
+  const nextLabel = current < total - 1 ? 'Next →' : (mode === 'test' ? 'Submit Test' : 'Finish');
+
+  body.innerHTML = `
+    <div class="modal-body" style="padding-top:.8rem">
+      <div class="cbt-progress-bar-wrap">
+        <div class="cbt-progress-bar" style="width:${pct}%"></div>
+      </div>
+      <div class="cbt-meta-row">
+        <div class="cbt-question-num">Question ${current + 1} / ${total}</div>
+        ${timerHtml}
+        <div class="cbt-chapter-tag">${q._chapterTitle || ''}</div>
+      </div>
+      <div class="cbt-question-text">${q.q}</div>
+      ${questionHtml}
+      ${feedbackHtml}
+      <div class="cbt-nav-row">
+        ${current > 0 && mode === 'practice'
+          ? `<button class="btn-action btn-read" onclick="prevQuestion()">← Prev</button>` : ''}
+        <button class="btn-cbt-next" id="cbt-next-btn"
+          onclick="nextOrSubmit()"
+          ${existingAnswer === null && q.type !== 'fillin' && mode === 'test' ? 'disabled' : ''}>
+          ${nextLabel}
+        </button>
+      </div>
+    </div>
+  `;
+}
+
+window.selectOption = function(idx) {
+  const { questions, current, mode, answers } = _cbt;
+  if (mode !== 'practice' && answers[current] !== null) return; // test: no re-select after answer?
+  // Allow selection even without submit in test mode (deselect/reselect)
+  const q = questions[current];
+  const opts = q.type === 'truefalse' ? ['True', 'False'] : (q.options || []);
+  const correctAnswer = q.answer;
+
+  let correctIdx = -1;
+  if (q.type === 'truefalse') {
+    correctIdx = correctAnswer.toString().toLowerCase() === 'true' ? 0 : 1;
+  } else {
+    // answer might be index (number) or text
+    if (typeof correctAnswer === 'number') {
+      correctIdx = correctAnswer;
+    } else {
+      correctIdx = opts.findIndex(o =>
+        o.trim().toLowerCase() === String(correctAnswer).trim().toLowerCase()
+      );
+      if (correctIdx === -1 && String(correctAnswer).length === 1) {
+        correctIdx = 'ABCDE'.indexOf(String(correctAnswer).toUpperCase());
+      }
+    }
+  }
+
+  const isCorrect = idx === correctIdx;
+
+  if (mode === 'practice') {
+    _cbt.answers[current] = {
+      selected:      idx,
+      correct:       isCorrect,
+      correctIdx:    correctIdx,
+      correctAnswer: opts[correctIdx] || correctAnswer,
+    };
+    renderCBTQuestion();
+  } else {
+    // test mode: highlight selected but don't lock until submit
+    _cbt.answers[current] = {
+      selected:      idx,
+      correct:       isCorrect,
+      correctIdx:    correctIdx,
+      correctAnswer: opts[correctIdx] || correctAnswer,
+    };
+    // just re-render to show selection
+    renderCBTQuestion();
+  }
+};
+
+window.submitAnswer = function() {
+  const { questions, current } = _cbt;
+  const q = questions[current];
+  if (q.type !== 'fillin') return;
+  const inp = document.getElementById('fillin-input');
+  if (!inp) return;
+  const userText    = inp.value.trim().toLowerCase();
+  const correctText = String(q.answer).trim().toLowerCase();
+  const isCorrect   = userText === correctText;
+  _cbt.answers[current] = {
+    text:          inp.value.trim(),
+    correct:       isCorrect,
+    correctAnswer: q.answer,
+    selected:      0,
+    correctIdx:    0,
+  };
+  renderCBTQuestion();
+};
+
+window.nextOrSubmit = function() {
+  const { questions, current, mode } = _cbt;
+  // If fill-in and no answer yet, try to submit first
+  const q = questions[current];
+  if (q.type === 'fillin' && _cbt.answers[current] === null) {
+    submitAnswer();
+    return;
+  }
+
+  if (current < questions.length - 1) {
+    _cbt.current++;
+    renderCBTQuestion();
+  } else {
+    endCBT();
+  }
+};
+
+window.prevQuestion = function() {
+  if (_cbt.current > 0) {
+    _cbt.current--;
+    renderCBTQuestion();
+  }
+};
+
+function startTimer() {
+  clearInterval(_cbt.timerHandle);
+  _cbt.timerHandle = setInterval(() => {
+    _cbt.timeLeft--;
+    const display = document.getElementById('cbt-timer-display');
+    if (display) {
+      display.textContent = `⏱ ${formatTime(_cbt.timeLeft)}`;
+      display.classList.toggle('danger', _cbt.timeLeft < 60);
+    }
+    if (_cbt.timeLeft <= 0) {
+      clearInterval(_cbt.timerHandle);
+      endCBT();
     }
   }, 1000);
 }
 
-function updateTimerDisplay() {
-  const el = document.getElementById('cbt-timer');
-  if (!el) return;
-  const m = Math.floor(cbtState.secondsLeft / 60);
-  const s = cbtState.secondsLeft % 60;
-  el.textContent = `${String(m).padStart(2,'0')}:${String(s).padStart(2,'0')}`;
-  el.style.color = cbtState.secondsLeft <= 60 ? '#c0392b' : '';
+function formatTime(secs) {
+  const m = Math.floor(secs / 60).toString().padStart(2, '0');
+  const s = (secs % 60).toString().padStart(2, '0');
+  return `${m}:${s}`;
 }
 
-/* ─────────────────────────────────────────────────────────────────
-   MODAL BACKDROP — clicking outside does NOT close (use X button only)
-───────────────────────────────────────────────────────────────── */
-const _cbtModal = document.getElementById('cbt-modal');
-if (_cbtModal) {
-  _cbtModal.addEventListener('click', function(e) {
-    // Intentionally no action — modal can only be closed via the X button
+async function endCBT() {
+  clearInterval(_cbt.timerHandle);
+
+  const { questions, answers, mode, sourceId, sourceName, timeLimit, timeLeft } = _cbt;
+  const total   = questions.length;
+  const correct = answers.filter(a => a && a.correct).length;
+  const score   = Math.round((correct / total) * 100);
+  const timeTaken = timeLimit > 0 ? timeLimit - timeLeft : 0;
+
+  // Save to cloud if logged in
+  if (_currentUser && _db) {
+    try {
+      await _fb.addDoc(
+        _fb.collection(_db, 'attempts'),
+        {
+          uid:        _currentUser.uid,
+          name:       _userProfile ? _userProfile.name : _currentUser.displayName || 'Student',
+          matric:     _userProfile ? _userProfile.matric : '',
+          level:      _userProfile ? _userProfile.level : '',
+          sourceId,
+          sourceName,
+          mode,
+          score,
+          correct,
+          total,
+          timeTaken,
+          createdAt: _fb.serverTimestamp(),
+        }
+      );
+    } catch (e) {
+      console.warn('[FUTA] Could not save attempt:', e);
+    }
+  }
+
+  renderCBTResults(correct, total, score, timeTaken, answers, questions, mode);
+}
+
+function renderCBTResults(correct, total, score, timeTaken, answers, questions, mode) {
+  const grade = getGrade(score);
+  const pct   = score;
+
+  // Animate the ring
+  const ring  = `conic-gradient(var(--gold) ${pct * 3.6}deg, var(--navy-3) 0deg)`;
+
+  let reviewHtml = '';
+  if (mode === 'test') {
+    reviewHtml = `
+      <div class="dash-section-title" style="margin-top:1.2rem">Review answers</div>
+      <div class="result-review">
+        ${questions.map((q, i) => {
+          const a   = answers[i];
+          const ok  = a && a.correct;
+          const opt = q.type === 'truefalse' ? ['True','False'] : (q.options || []);
+          const yourAns   = a ? (opt[a.selected] || a.text || '(no answer)') : '(no answer)';
+          const correctAns = a ? a.correctAnswer : q.answer;
+          return `
+            <div class="review-item ${ok ? 'ri-correct' : 'ri-wrong'}">
+              <div class="review-q">${i+1}. ${q.q}</div>
+              <div class="review-a">
+                Your answer: <span class="your-a">${yourAns}</span>
+                ${!ok ? `· Correct: <span class="correct-a">${correctAns}</span>` : ''}
+              </div>
+              ${q.explanation && !ok ? `<div class="review-exp">${q.explanation}</div>` : ''}
+            </div>`;
+        }).join('')}
+      </div>`;
+  }
+
+  const timeStr = timeTaken > 0 ? formatTime(timeTaken) : '—';
+
+  document.getElementById('cbt-body').innerHTML = `
+    <div class="modal-body">
+      <div class="result-hero">
+        <div class="result-ring" style="background:${ring}">
+          <span class="result-percent">${pct}%</span>
+        </div>
+        <div class="result-grade">${grade.label}</div>
+        <div style="font-size:.82rem;color:var(--text-dim)">${_cbt.sourceName}</div>
+      </div>
+      <div class="result-stats">
+        <div class="result-stat"><span class="n">${correct}</span><span class="l">Correct</span></div>
+        <div class="result-stat"><span class="n">${total - correct}</span><span class="l">Wrong</span></div>
+        <div class="result-stat"><span class="n">${timeStr}</span><span class="l">Time</span></div>
+      </div>
+      ${!_currentUser ? `<div style="text-align:center;font-size:.8rem;color:var(--text-dim);margin-bottom:1rem">
+        <a href="#" onclick="openAuthModal();return false" style="color:var(--gold-light)">Sign in</a>
+        to save your results and appear on the leaderboard
+      </div>` : ''}
+      <div style="display:flex;gap:.6rem;flex-wrap:wrap;margin-bottom:1rem">
+        <button class="btn-action btn-practice"
+          onclick="document.getElementById('cbt-modal').classList.remove('active')">Close</button>
+        <button class="btn-action btn-test"
+          onclick="openCBTConfigurator(document.getElementById('cbt-modal')._origChapters||[],_cbt.sourceName,_cbt.sourceId,_cbt.mode)">
+          Retry
+        </button>
+        ${_currentUser ? `<button class="btn-action btn-read"
+          onclick="document.getElementById('cbt-modal').classList.remove('active');navigate('dashboard')">
+          My Dashboard
+        </button>` : ''}
+      </div>
+      ${reviewHtml}
+    </div>
+  `;
+}
+
+function getGrade(score) {
+  if (score >= 90) return { label: 'Distinction — Excellent!' };
+  if (score >= 75) return { label: 'Credit — Well done!' };
+  if (score >= 60) return { label: 'Pass — Keep it up!' };
+  if (score >= 50) return { label: 'Borderline — Study harder.' };
+  return { label: 'Fail — Review your notes.' };
+}
+
+window.closeCBT = function() {
+  clearInterval(_cbt.timerHandle);
+  document.getElementById('cbt-modal').classList.remove('active');
+};
+
+// ============================================================
+//  AUTH MODAL
+// ============================================================
+window.openAuthModal = function(tab) {
+  const modal = document.getElementById('auth-modal');
+  if (!modal) return;
+  modal.classList.add('active');
+  switchAuthTab(tab || 'login');
+};
+
+window.closeAuthModal = function() {
+  document.getElementById('auth-modal').classList.remove('active');
+};
+
+window.switchAuthTab = function(tab) {
+  document.querySelectorAll('.auth-tab').forEach(t => {
+    t.classList.toggle('active', t.dataset.tab === tab);
   });
+  document.getElementById('auth-login-form').style.display  = tab === 'login'    ? 'block' : 'none';
+  document.getElementById('auth-register-form').style.display = tab === 'register' ? 'block' : 'none';
+};
+
+window.doRegister = async function() {
+  if (!_auth) { showToast('Firebase not configured.', 'error'); return; }
+  const name   = document.getElementById('reg-name').value.trim();
+  const matric = document.getElementById('reg-matric').value.trim().toUpperCase();
+  const email  = document.getElementById('reg-email').value.trim();
+  const level  = document.getElementById('reg-level').value;
+  const pass   = document.getElementById('reg-password').value;
+  const errEl  = document.getElementById('reg-error');
+
+  if (!name || !matric || !email || !level || !pass) {
+    errEl.textContent = 'Please fill in all fields.'; errEl.classList.add('visible'); return;
+  }
+  if (pass.length < 6) {
+    errEl.textContent = 'Password must be at least 6 characters.'; errEl.classList.add('visible'); return;
+  }
+  errEl.classList.remove('visible');
+
+  const btn = document.getElementById('reg-btn');
+  btn.disabled = true; btn.textContent = 'Creating account…';
+
+  try {
+    const { user } = await _fb.createUserWithEmailAndPassword(_auth, email, pass);
+    await _fb.setDoc(_fb.doc(_db, 'users', user.uid), {
+      name, matric, email, level,
+      isAdmin: user.uid === window.ADMIN_UID,
+      createdAt: _fb.serverTimestamp(),
+    });
+    closeAuthModal();
+    showToast(`Welcome, ${name}!`, 'success');
+  } catch (e) {
+    errEl.textContent = friendlyAuthError(e.code);
+    errEl.classList.add('visible');
+  }
+  btn.disabled = false; btn.textContent = 'Create Account';
+};
+
+window.doLogin = async function() {
+  if (!_auth) { showToast('Firebase not configured.', 'error'); return; }
+  const email = document.getElementById('login-email').value.trim();
+  const pass  = document.getElementById('login-password').value;
+  const errEl = document.getElementById('login-error');
+  errEl.classList.remove('visible');
+
+  const btn = document.getElementById('login-btn');
+  btn.disabled = true; btn.textContent = 'Signing in…';
+
+  try {
+    await _fb.signInWithEmailAndPassword(_auth, email, pass);
+    closeAuthModal();
+    showToast('Signed in successfully!', 'success');
+  } catch (e) {
+    errEl.textContent = friendlyAuthError(e.code);
+    errEl.classList.add('visible');
+  }
+  btn.disabled = false; btn.textContent = 'Sign In';
+};
+
+window.doLogout = async function() {
+  if (!_auth) return;
+  await _fb.signOut(_auth);
+  _userProfile = null;
+  closeUserDropdown();
+  showToast('Signed out.', 'success');
+};
+
+function friendlyAuthError(code) {
+  const map = {
+    'auth/email-already-in-use':  'This email is already registered.',
+    'auth/invalid-email':         'Please enter a valid email address.',
+    'auth/weak-password':         'Password too weak. Use at least 6 characters.',
+    'auth/user-not-found':        'No account found with this email.',
+    'auth/wrong-password':        'Incorrect password.',
+    'auth/too-many-requests':     'Too many attempts. Please wait and try again.',
+    'auth/network-request-failed':'Network error. Check your connection.',
+  };
+  return map[code] || 'Something went wrong. Please try again.';
 }
 
-/* ─────────────────────────────────────────────────────────────────
-   BACK / FORWARD BUTTON SUPPORT
-───────────────────────────────────────────────────────────────── */
-window.addEventListener('popstate', function() {
-  const hash = window.location.hash;
-  if (!hash || hash === '#home') {
-    state = { page: 'home', levelId: null, semId: null, courseCode: null, chapterIdx: null };
-    document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
-    document.getElementById('page-home').classList.add('active');
-    renderHome();
-    updateBreadcrumb();
-    window.scrollTo({ top: 0, behavior: 'smooth' });
-  } else if (hash === '#levels') {
-    navigate('levels');
-  } else if (hash.startsWith('#level/')) {
-    navigate('level', hash.replace('#level/', ''));
-  } else if (hash.startsWith('#course/')) {
-    const parts = hash.replace('#course/', '').split('/');
-    navigate('course', parts[0], parts[1]);
-  } else if (hash.startsWith('#chapter/')) {
-    const parts = hash.replace('#chapter/', '').split('/');
-    navigate('chapter', parts[0], parts[1], null, parseInt(parts[2]));
+// ============================================================
+//  NAV AUTH UI
+// ============================================================
+function renderNavAuth() {
+  const area = document.getElementById('nav-auth-area');
+  if (!area) return;
+  if (_currentUser && _userProfile) {
+    const initials = _userProfile.name.split(' ').map(n => n[0]).join('').slice(0, 2).toUpperCase();
+    const shortName = _userProfile.name.split(' ')[0];
+    area.innerHTML = `
+      <div class="nav-user-chip" onclick="toggleUserDropdown()">
+        <div class="nav-avatar">${initials}</div>
+        <div class="nav-username">${shortName}</div>
+      </div>`;
+  } else {
+    area.innerHTML = `
+      <button class="nav-btn" onclick="openAuthModal('login')">Sign In</button>
+      <button class="nav-btn primary" onclick="openAuthModal('register')">Register</button>`;
+  }
+}
+
+window.toggleUserDropdown = function() {
+  const dd = document.getElementById('user-dropdown');
+  if (!dd) return;
+  const isOpen = dd.classList.contains('open');
+  dd.classList.toggle('open', !isOpen);
+  if (!isOpen && _userProfile) {
+    const isAdmin = _currentUser && _currentUser.uid === window.ADMIN_UID;
+    dd.innerHTML = `
+      <div class="user-dropdown-header">
+        <div class="user-dropdown-name">${_userProfile.name}</div>
+        <div class="user-dropdown-matric">${_userProfile.matric} · ${_userProfile.level}</div>
+      </div>
+      <button class="user-dropdown-item" onclick="closeUserDropdown();navigate('dashboard')">
+        <span class="ico">📊</span> My Dashboard
+      </button>
+      ${isAdmin ? `<button class="user-dropdown-item" onclick="closeUserDropdown();navigate('admin')">
+        <span class="ico">🛡</span> Admin Panel
+      </button>` : ''}
+      <button class="user-dropdown-item danger" onclick="doLogout()">
+        <span class="ico">↩</span> Sign Out
+      </button>`;
+  }
+};
+
+window.closeUserDropdown = function() {
+  const dd = document.getElementById('user-dropdown');
+  if (dd) dd.classList.remove('open');
+};
+
+document.addEventListener('click', e => {
+  const dd   = document.getElementById('user-dropdown');
+  const chip = document.querySelector('.nav-user-chip');
+  if (dd && dd.classList.contains('open') && !dd.contains(e.target) && (!chip || !chip.contains(e.target))) {
+    closeUserDropdown();
   }
 });
 
-/* ─────────────────────────────────────────────────────────────────
-   INIT
-───────────────────────────────────────────────────────────────── */
-try {
-  const hash = window.location.hash;
-  if (hash === '#levels') {
-    navigate('levels');
-  } else if (hash.startsWith('#level/')) {
-    navigate('level', hash.replace('#level/', ''));
-  } else if (hash.startsWith('#chapter/')) {
-    const parts = hash.replace('#chapter/', '').split('/');
-    navigate('chapter', parts[0], parts[1], null, parseInt(parts[2]));
-  } else if (hash.startsWith('#course/')) {
-    const parts = hash.replace('#course/', '').split('/');
-    navigate('course', parts[0], parts[1]);
-  } else {
-    renderHome();
-    updateBreadcrumb();
-  }
-} catch (err) {
-  console.error('[FUTA Portal] Init error — check that data.js is loaded before app.js:', err);
+// ============================================================
+//  NAV BIND
+// ============================================================
+function bindNav() {
+  const crest = document.querySelector('.nav-crest');
+  const logo  = document.querySelector('.nav-logo');
+  if (crest) crest.onclick = () => navigate('home');
+  if (logo)  logo.onclick  = () => navigate('home');
+  renderNavAuth();
 }
+
+// ============================================================
+//  STUDENT DASHBOARD
+// ============================================================
+async function renderDashboard() {
+  setBreadcrumb(['Home', 'My Dashboard']);
+  const content = document.getElementById('dashboard-content');
+  if (!content) return;
+
+  if (!_currentUser) {
+    content.innerHTML = `
+      <div class="empty-state" style="padding-top:3rem">
+        <div class="icon">🔒</div>
+        <p>Please <a href="#" onclick="openAuthModal('login');return false">sign in</a> to view your dashboard.</p>
+      </div>`;
+    return;
+  }
+
+  content.innerHTML = `<div style="display:flex;justify-content:center;padding:3rem">
+    <div class="spinner"></div></div>`;
+
+  try {
+    const attSnap = await _fb.getDocs(
+      _fb.query(
+        _fb.collection(_db, 'attempts'),
+        _fb.where('uid', '==', _currentUser.uid),
+        _fb.orderBy('createdAt', 'desc'),
+        _fb.limit(50)
+      )
+    );
+    const attempts = attSnap.docs.map(d => ({ id: d.id, ...d.data() }));
+    renderDashboardContent(content, attempts);
+  } catch (e) {
+    content.innerHTML = `<div class="empty-state"><p>Could not load your data. Check your connection.</p></div>`;
+    console.error(e);
+  }
+}
+
+function renderDashboardContent(container, attempts) {
+  if (attempts.length === 0) {
+    container.innerHTML = `
+      <div class="empty-state" style="padding-top:3rem">
+        <div class="icon">📝</div>
+        <p>No CBT attempts yet. Start practising to track your progress!</p>
+      </div>`;
+    return;
+  }
+
+  const total   = attempts.length;
+  const avgScore = Math.round(attempts.reduce((s, a) => s + a.score, 0) / total);
+  const bestScore = Math.max(...attempts.map(a => a.score));
+
+  // Weak topics (avg < 60%)
+  const sourceAvg = {};
+  attempts.forEach(a => {
+    if (!sourceAvg[a.sourceId]) sourceAvg[a.sourceId] = { sum: 0, count: 0, name: a.sourceName };
+    sourceAvg[a.sourceId].sum   += a.score;
+    sourceAvg[a.sourceId].count += 1;
+  });
+  const weak = Object.values(sourceAvg)
+    .filter(x => x.sum / x.count < 60)
+    .sort((a, b) => (a.sum/a.count) - (b.sum/b.count))
+    .slice(0, 6);
+
+  container.innerHTML = `
+    <div style="padding-top:2rem">
+      <div class="dash-stats-row">
+        <div class="dash-stat-card"><div class="dash-stat-n">${total}</div><div class="dash-stat-l">Attempts</div></div>
+        <div class="dash-stat-card"><div class="dash-stat-n">${avgScore}%</div><div class="dash-stat-l">Avg Score</div></div>
+        <div class="dash-stat-card"><div class="dash-stat-n">${bestScore}%</div><div class="dash-stat-l">Best Score</div></div>
+        <div class="dash-stat-card"><div class="dash-stat-n">${_userProfile ? _userProfile.level : ''}</div><div class="dash-stat-l">Level</div></div>
+      </div>
+
+      ${weak.length > 0 ? `
+        <div class="dash-section">
+          <div class="dash-section-title">Topics to focus on (below 60%)</div>
+          <div>${weak.map(w =>
+            `<span class="weak-topic-tag">${w.name} — ${Math.round(w.sum/w.count)}%</span>`
+          ).join('')}</div>
+        </div>` : ''}
+
+      <div class="dash-section">
+        <div class="dash-section-title">Recent attempts</div>
+        <div style="overflow-x:auto">
+          <table class="attempt-table">
+            <thead><tr>
+              <th>Source</th><th>Mode</th><th>Score</th>
+              <th>Date</th><th>Time</th>
+            </tr></thead>
+            <tbody>
+              ${attempts.slice(0, 15).map(a => {
+                const scoreClass = a.score >= 70 ? 'high' : a.score >= 50 ? 'mid' : 'low';
+                const date = a.createdAt && a.createdAt.toDate
+                  ? a.createdAt.toDate().toLocaleDateString('en-GB', { day:'2-digit', month:'short' })
+                  : '—';
+                const time = a.timeTaken > 0 ? formatTime(a.timeTaken) : '—';
+                return `<tr>
+                  <td style="color:var(--text-main)">${a.sourceName}</td>
+                  <td>${a.mode}</td>
+                  <td><span class="score-pill ${scoreClass}">${a.score}%</span></td>
+                  <td>${date}</td>
+                  <td>${time}</td>
+                </tr>`;
+              }).join('')}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <div class="dash-section">
+        <div class="dash-section-title">Leaderboard — Top 5 (all my courses)</div>
+        <div id="leaderboard-container"><div class="spinner"></div></div>
+      </div>
+    </div>
+  `;
+
+  loadLeaderboard(attempts.map(a => a.sourceId).filter((v, i, arr) => arr.indexOf(v) === i));
+}
+
+async function loadLeaderboard(sourceIds) {
+  const container = document.getElementById('leaderboard-container');
+  if (!container || !_db) return;
+  try {
+    // Get top 5 per sourceId for the user's attempted sources
+    const results = {};
+    for (const sid of sourceIds.slice(0, 5)) {
+      const snap = await _fb.getDocs(
+        _fb.query(
+          _fb.collection(_db, 'attempts'),
+          _fb.where('sourceId', '==', sid),
+          _fb.orderBy('score', 'desc'),
+          _fb.limit(5)
+        )
+      );
+      results[sid] = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+    }
+    renderLeaderboard(container, results);
+  } catch (e) {
+    container.innerHTML = `<p style="font-size:.8rem;color:var(--text-dim)">Could not load leaderboard.</p>`;
+  }
+}
+
+function renderLeaderboard(container, results) {
+  const rankColors = ['gold-r', 'silver-r', 'bronze-r', '', ''];
+  let html = '';
+  for (const [sid, entries] of Object.entries(results)) {
+    if (!entries.length) continue;
+    const title = entries[0].sourceName;
+    html += `<div style="margin-bottom:1.5rem">
+      <div style="font-size:.75rem;color:var(--text-dim);margin-bottom:.5rem">${title}</div>
+      <div class="leaderboard-list">
+        ${entries.map((e, i) => {
+          const initials = e.name ? e.name.split(' ').map(n=>n[0]).join('').slice(0,2).toUpperCase() : '??';
+          const isYou    = _currentUser && e.uid === _currentUser.uid;
+          const date     = e.createdAt && e.createdAt.toDate
+            ? e.createdAt.toDate().toLocaleDateString('en-GB', {day:'2-digit',month:'short'}) : '';
+          return `<div class="lb-row">
+            <div class="lb-rank ${rankColors[i]}">${['🥇','🥈','🥉','4','5'][i]}</div>
+            <div style="display:flex;align-items:center;gap:.5rem;flex:1">
+              <div class="nav-avatar" style="width:28px;height:28px;font-size:.6rem">${initials}</div>
+              <div class="lb-name">${e.name} ${isYou ? '<span class="lb-you-tag">You</span>' : ''}</div>
+            </div>
+            <div class="lb-date">${date}</div>
+            <div class="lb-score">${e.score}%</div>
+          </div>`;
+        }).join('')}
+      </div>
+    </div>`;
+  }
+  container.innerHTML = html || `<p style="font-size:.8rem;color:var(--text-dim)">No leaderboard data yet.</p>`;
+}
+
+// ============================================================
+//  ADMIN PANEL
+// ============================================================
+async function renderAdmin() {
+  setBreadcrumb(['Home', 'Admin Panel']);
+  const content = document.getElementById('admin-content');
+  if (!content) return;
+
+  if (!_currentUser || _currentUser.uid !== window.ADMIN_UID) {
+    content.innerHTML = `<div class="empty-state"><div class="icon">🛡</div>
+      <p>Access denied. Admin only.</p></div>`;
+    return;
+  }
+
+  content.innerHTML = `<div style="display:flex;justify-content:center;padding:3rem">
+    <div class="spinner"></div></div>`;
+
+  try {
+    const [usersSnap, attSnap] = await Promise.all([
+      _fb.getDocs(_fb.collection(_db, 'users')),
+      _fb.getDocs(_fb.query(
+        _fb.collection(_db, 'attempts'),
+        _fb.orderBy('createdAt', 'desc'),
+        _fb.limit(200)
+      ))
+    ]);
+    const users    = usersSnap.docs.map(d => ({ id: d.id, ...d.data() }));
+    const attempts = attSnap.docs.map(d => ({ id: d.id, ...d.data() }));
+    renderAdminContent(content, users, attempts);
+  } catch (e) {
+    content.innerHTML = `<div class="empty-state"><p>Could not load admin data.</p></div>`;
+    console.error(e);
+  }
+}
+
+function renderAdminContent(container, users, attempts) {
+  container.innerHTML = `
+    <div style="padding-top:2rem">
+      <div class="dash-stats-row">
+        <div class="dash-stat-card"><div class="dash-stat-n">${users.length}</div><div class="dash-stat-l">Students</div></div>
+        <div class="dash-stat-card"><div class="dash-stat-n">${attempts.length}</div><div class="dash-stat-l">Total Attempts</div></div>
+        <div class="dash-stat-card">
+          <div class="dash-stat-n">${attempts.length > 0 ? Math.round(attempts.reduce((s,a)=>s+a.score,0)/attempts.length) : 0}%</div>
+          <div class="dash-stat-l">Overall Avg</div>
+        </div>
+        <div class="dash-stat-card"><div class="dash-stat-n">${new Set(attempts.map(a=>a.sourceId)).size}</div><div class="dash-stat-l">Topics Tested</div></div>
+      </div>
+
+      <div class="admin-toolbar">
+        <input class="form-input" type="text" id="admin-search"
+          placeholder="Search by name, matric or course…" oninput="filterAdminTable()">
+        <button class="btn-outline" onclick="exportAdminCSV()">Export CSV</button>
+      </div>
+
+      <div class="dash-section">
+        <div class="dash-section-title">All attempts (latest ${attempts.length})</div>
+        <div style="overflow-x:auto">
+          <table class="attempt-table" id="admin-table">
+            <thead><tr>
+              <th>Student</th><th>Matric</th><th>Level</th>
+              <th>Course / Chapter</th><th>Mode</th><th>Score</th><th>Date</th>
+            </tr></thead>
+            <tbody id="admin-tbody">
+              ${attempts.map(a => {
+                const sc  = a.score >= 70 ? 'high' : a.score >= 50 ? 'mid' : 'low';
+                const date = a.createdAt && a.createdAt.toDate
+                  ? a.createdAt.toDate().toLocaleDateString('en-GB', {day:'2-digit',month:'short',year:'2-digit'})
+                  : '—';
+                return `<tr>
+                  <td style="color:var(--text-main)">${a.name || '—'}</td>
+                  <td><code style="font-size:.75rem">${a.matric || '—'}</code></td>
+                  <td>${a.level || '—'}</td>
+                  <td>${a.sourceName}</td>
+                  <td>${a.mode}</td>
+                  <td><span class="score-pill ${sc}">${a.score}%</span></td>
+                  <td>${date}</td>
+                </tr>`;
+              }).join('')}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <div class="dash-section">
+        <div class="dash-section-title">Registered students (${users.length})</div>
+        <div style="overflow-x:auto">
+          <table class="attempt-table">
+            <thead><tr><th>Name</th><th>Matric</th><th>Level</th><th>Email</th></tr></thead>
+            <tbody>
+              ${users.map(u => `<tr>
+                <td style="color:var(--text-main)">${u.name}</td>
+                <td><code style="font-size:.75rem">${u.matric}</code></td>
+                <td>${u.level}</td>
+                <td style="color:var(--text-dim);font-size:.8rem">${u.email}</td>
+              </tr>`).join('')}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  `;
+
+  // Store attempts for CSV export
+  container._attempts = attempts;
+  container._users    = users;
+}
+
+window.filterAdminTable = function() {
+  const q    = document.getElementById('admin-search').value.toLowerCase();
+  const rows = document.querySelectorAll('#admin-tbody tr');
+  rows.forEach(row => {
+    row.style.display = row.textContent.toLowerCase().includes(q) ? '' : 'none';
+  });
+};
+
+window.exportAdminCSV = function() {
+  const container = document.getElementById('admin-content');
+  if (!container || !container._attempts) return;
+  const rows = [['Name','Matric','Level','Source','Mode','Score','Date']];
+  container._attempts.forEach(a => {
+    const date = a.createdAt && a.createdAt.toDate
+      ? a.createdAt.toDate().toLocaleDateString('en-GB') : '';
+    rows.push([a.name||'',a.matric||'',a.level||'',a.sourceName,a.mode,a.score+'%',date]);
+  });
+  const csv = rows.map(r => r.map(c => `"${c}"`).join(',')).join('\n');
+  const a   = document.createElement('a');
+  a.href    = 'data:text/csv;charset=utf-8,' + encodeURIComponent(csv);
+  a.download = 'futa_attempts_' + new Date().toISOString().slice(0,10) + '.csv';
+  a.click();
+};
+
+// ============================================================
+//  TOAST
+// ============================================================
+let _toastTimer;
+function showToast(msg, type) {
+  let toast = document.getElementById('portal-toast');
+  if (!toast) {
+    toast = document.createElement('div');
+    toast.id = 'portal-toast';
+    toast.className = 'toast';
+    document.body.appendChild(toast);
+  }
+  toast.textContent = msg;
+  toast.className   = `toast${type ? ' ' + type : ''}`;
+  clearTimeout(_toastTimer);
+  setTimeout(() => toast.classList.add('show'), 10);
+  _toastTimer = setTimeout(() => toast.classList.remove('show'), 3200);
+}
+window.showToast = showToast;
