@@ -6,7 +6,7 @@
 //  Load order: firebase.js → registry.js → courses → data.js → app.js
 // ============================================================
 
-‘use strict’;
+‘use strict’; 
 
 // ── FIREBASE INSTANCES ────────────────────────────────────────
 let _auth        = null;
