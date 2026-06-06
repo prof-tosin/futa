@@ -737,7 +737,7 @@ function renderCBTQuestion() {
   const timerHtml = (mode === 'test' && timeLimit > 0)
     ? `<div class="cbt-timer${timeLeft < 60 ? ' danger':''}" id="cbt-timer-display">⏱ ${formatTime(timeLeft)}</div>` : '';
 
-  // Normalise question fields (supports both old format and new)
+  // Normalise question fields — supports both old and new format
   const qText    = q.q    || q.text    || '';
   const qOptions = q.options || [];
   const qAnswer  = q.answer !== undefined ? q.answer : q.correct;
@@ -782,6 +782,24 @@ function renderCBTQuestion() {
       </div>`;
   }
 
+  // ── Question navigator boxes ──────────────────────────────
+  // In test mode: answered=green, skipped=red, current=gold, not-yet=muted blue
+  // In practice mode: correct=green, wrong=red, current=gold, not-yet=muted blue
+  const navBoxes = questions.map((_, i) => {
+    const ans = _cbt.answers[i];
+    let cls   = 'qnav-box';
+    if (i === current) {
+      cls += ' qnav-current';
+    } else if (ans === null) {
+      cls += ' qnav-pending';
+    } else if (mode === 'test') {
+      cls += ' qnav-answered';           // green — answered (don't reveal right/wrong yet)
+    } else {
+      cls += ans.correct ? ' qnav-correct' : ' qnav-wrong';
+    }
+    return `<div class="${cls}" onclick="jumpToQuestion(${i})" title="Q${i+1}">${i+1}</div>`;
+  }).join('');
+
   const nextLabel = current < total - 1 ? 'Next →' : (mode === 'test' ? 'Submit Test' : 'Finish');
   const canNext   = existingAnswer !== null || qType === 'fillin';
 
@@ -799,11 +817,24 @@ function renderCBTQuestion() {
       ${questionHtml}
       ${feedbackHtml}
       <div class="cbt-nav-row">
-        ${current > 0 && mode === 'practice'
+        ${current > 0
           ? `<button class="btn-action btn-read" onclick="prevQuestion()">← Prev</button>` : ''}
         <button class="btn-cbt-next" id="cbt-next-btn" onclick="nextOrSubmit()"
           ${!canNext && mode === 'test' ? 'disabled' : ''}>${nextLabel}</button>
       </div>
+      <div class="qnav-grid" id="qnav-grid">${navBoxes}</div>
+      ${mode === 'test' ? `
+      <div class="qnav-legend">
+        <span class="qnav-legend-item"><span class="qnav-box qnav-answered"></span> Answered</span>
+        <span class="qnav-legend-item"><span class="qnav-box qnav-pending"></span> Not yet</span>
+        <span class="qnav-legend-item"><span class="qnav-box qnav-current"></span> Current</span>
+      </div>` : `
+      <div class="qnav-legend">
+        <span class="qnav-legend-item"><span class="qnav-box qnav-correct"></span> Correct</span>
+        <span class="qnav-legend-item"><span class="qnav-box qnav-wrong"></span> Wrong</span>
+        <span class="qnav-legend-item"><span class="qnav-box qnav-pending"></span> Not yet</span>
+        <span class="qnav-legend-item"><span class="qnav-box qnav-current"></span> Current</span>
+      </div>`}
     </div>`;
 }
 
@@ -858,6 +889,13 @@ window.nextOrSubmit = function() {
 
 window.prevQuestion = function() {
   if (_cbt.current > 0) { _cbt.current--; renderCBTQuestion(); }
+};
+
+window.jumpToQuestion = function(idx) {
+  if (idx >= 0 && idx < _cbt.questions.length) {
+    _cbt.current = idx;
+    renderCBTQuestion();
+  }
 };
 
 function startTimer() {
