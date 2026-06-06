@@ -8,7 +8,7 @@ const FIREBASE_CONFIG = {
   databaseURL:       "https://futa-online-class-default-rtdb.firebaseio.com"
 };
 
-const ADMIN_UID = "PASTE_YOUR_ADMIN_UID_HERE";
+const ADMIN_UID = "xXMlPKAw0UY5kNcPhuMJEhEMqW82";
 
 window.FIREBASE_CONFIG = FIREBASE_CONFIG;
 window.ADMIN_UID       = ADMIN_UID;
