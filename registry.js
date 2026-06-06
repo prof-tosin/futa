@@ -12,6 +12,12 @@
 //      description, chapters: [{ title, summary, keyPoints,
 //      questions: [{ type, q, options, answer, explanation }] }] })
 //
+//  Supported question types:
+//    mcq  — multiple choice (default)
+//    tf   — true / false   (answer normalised to boolean)
+//    fitb — fill in the blank (answer normalised to string array;
+//            matching is always case-insensitive)
+//
 //  Both formats are normalised into the new object shape before
 //  being stored in _COURSE_REGISTRY.
 // ============================================================
@@ -19,11 +25,7 @@
 window._COURSE_REGISTRY = window._COURSE_REGISTRY || [];
 
 // ── CODE → LEVEL mapping for old-format courses ──────────────
-// Derived from course code prefix and number.
-// Override by adding level: '...' inside the chapter array as
-// a leading meta-object: [{_meta:{level:'300l'}}, {chapter1...}]
 const _CODE_LEVEL_MAP = {
-  // 100 Level courses
   'MTS 101': '100l', 'MTS 102': '100l', 'MTS 104': '100l',
   'CSC 102': '100l', 'EEE 102': '100l',
   'PHY 102': '100l', 'PHY 108': '100l',
@@ -31,7 +33,6 @@ const _CODE_LEVEL_MAP = {
   'BIO 102': '100l', 'BIO 104': '100l',
   'GNS 102': '100l', 'GNS 106': '100l',
   'MEE 102': '100l',
-  // 300 Level
   'ENT 301': '300l',
 };
 
@@ -53,16 +54,96 @@ function _codeToId(code) {
   return code.toLowerCase().replace(/\s+/g, '');
 }
 
-// ── Normalise a single question from old → new format ─────────
-function _normaliseQuestion(q) {
+// ── Normalise a TRUE/FALSE question ──────────────────────────
+// answer is always stored as a boolean.
+// Matching at quiz-time should be case-insensitive (handled by
+// the UI layer — options are always ['True','False']).
+function _normaliseTF(q) {
+  const raw = q.answer !== undefined ? q.answer : q.correct;
+  let answer;
+  if (typeof raw === 'boolean') {
+    answer = raw;
+  } else if (typeof raw === 'string') {
+    answer = raw.trim().toLowerCase() === 'true';
+  } else {
+    answer = false;
+    console.warn('[PORTAL_INJECT] tf question has no recognisable answer:', q);
+  }
   return {
-    type:        q.type || 'mcq',
+    type:        'tf',
+    q:           q.q || q.text || '',
+    options:     ['True', 'False'], // always present so UI can render normally
+    answer:      answer,            // boolean
+    explanation: q.explanation || '',
+    _orig:       q,
+  };
+}
+
+// ── Normalise a FILL-IN-THE-BLANK question ────────────────────
+// answer is always stored as an array of accepted strings.
+// caseSensitive is always forced to false (case-insensitive matching).
+function _normaliseFITB(q) {
+  const raw = q.answer !== undefined ? q.answer : q.correct;
+  let answers;
+  if (Array.isArray(raw)) {
+    answers = raw.map(String);
+  } else if (raw !== undefined && raw !== null) {
+    answers = [String(raw)];
+  } else {
+    answers = [];
+    console.warn('[PORTAL_INJECT] fitb question has no answer:', q);
+  }
+  return {
+    type:          'fitb',
+    q:             q.q || q.text || '',
+    options:       [],       // unused but kept for schema consistency
+    answer:        answers,  // array of accepted strings
+    caseSensitive: false,    // always case-insensitive
+    explanation:   q.explanation || '',
+    _orig:         q,
+  };
+}
+
+// ── Helper: check a learner's fitb response ───────────────────
+// Always case-insensitive (caseSensitive flag is kept in the
+// schema for forward-compatibility but is ignored here).
+// Usage: window._checkFITB(normalisedQuestion, userTypedString) → boolean
+window._checkFITB = function (question, userInput) {
+  if (!userInput) return false;
+  const input = userInput.trim().toLowerCase();
+  return question.answer.some(accepted => accepted.trim().toLowerCase() === input);
+};
+
+// ── Helper: check a learner's tf response ────────────────────
+// Accepts boolean or string ('true'/'false') from the UI.
+// Always case-insensitive string comparison before converting.
+// Usage: window._checkTF(normalisedQuestion, userResponse) → boolean
+window._checkTF = function (question, userResponse) {
+  let response;
+  if (typeof userResponse === 'boolean') {
+    response = userResponse;
+  } else if (typeof userResponse === 'string') {
+    response = userResponse.trim().toLowerCase() === 'true';
+  } else {
+    return false;
+  }
+  return response === question.answer;
+};
+
+// ── Normalise a single question — routes by type ──────────────
+function _normaliseQuestion(q) {
+  const type = (q.type || 'mcq').toLowerCase();
+  if (type === 'tf')   return _normaliseTF(q);
+  if (type === 'fitb') return _normaliseFITB(q);
+
+  // ── MCQ (default) — original logic preserved exactly ─────────
+  return {
+    type:        'mcq',
     q:           q.q    || q.text || '',
     options:     q.options || [],
     answer:      q.answer  !== undefined ? q.answer : q.correct,
     explanation: q.explanation || '',
-    // keep original fields too so nothing is lost
-    _orig: q,
+    _orig:       q,
   };
 }
 
@@ -115,8 +196,6 @@ function _normalise(arg1, arg2) {
       chapters = chapters.slice(1);
     }
 
-    // Build a readable title from the code
-    // e.g. "PHY 102" → look up a title map, or just use the code
     const titleMap = {
       'PHY 102': 'Basic Physics II',
       'PHY 108': 'Basic Physics I',
