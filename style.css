@@ -1374,7 +1374,88 @@ select.form-input option { background: var(--navy-2); }
 }
 @keyframes spin { to { transform: rotate(360deg); } }
 
-/* ── HOME QUICK LINKS (shown after login) ─────────────────── */
+/* ── QUESTION NAVIGATOR GRID ─────────────────────────────── */
+.qnav-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  margin-top: 1rem;
+  padding-top: .9rem;
+  border-top: 1px solid rgba(201,153,58,.1);
+}
+.qnav-box {
+  width: 30px;
+  height: 30px;
+  border-radius: var(--radius-sm);
+  font-size: .72rem;
+  font-family: 'JetBrains Mono', monospace;
+  font-weight: 500;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: transform .12s ease, opacity .12s;
+  flex-shrink: 0;
+  border: 1px solid transparent;
+}
+.qnav-box:hover { transform: scale(1.12); }
+
+/* Not yet attempted — muted blue */
+.qnav-pending  {
+  background: rgba(74,158,222,.18);
+  border-color: rgba(74,158,222,.35);
+  color: var(--info);
+}
+/* Current question — gold */
+.qnav-current  {
+  background: rgba(201,153,58,.3);
+  border-color: var(--gold);
+  color: var(--gold-light);
+  box-shadow: 0 0 0 2px rgba(201,153,58,.4);
+}
+/* Test mode — answered (green, right/wrong hidden) */
+.qnav-answered {
+  background: rgba(76,175,138,.25);
+  border-color: rgba(76,175,138,.55);
+  color: var(--success);
+}
+/* Practice mode — correct (green) */
+.qnav-correct  {
+  background: rgba(76,175,138,.25);
+  border-color: rgba(76,175,138,.55);
+  color: var(--success);
+}
+/* Practice mode — wrong (red) */
+.qnav-wrong    {
+  background: rgba(224,92,92,.22);
+  border-color: rgba(224,92,92,.5);
+  color: var(--danger);
+}
+
+.qnav-legend {
+  display: flex;
+  gap: 1rem;
+  flex-wrap: wrap;
+  margin-top: .55rem;
+  font-size: .72rem;
+  color: var(--text-dim);
+}
+.qnav-legend-item {
+  display: flex;
+  align-items: center;
+  gap: .35rem;
+}
+.qnav-legend-item .qnav-box {
+  width: 14px;
+  height: 14px;
+  font-size: 0;
+  cursor: default;
+  pointer-events: none;
+  border-radius: 3px;
+}
+.qnav-legend-item .qnav-box:hover { transform: none; }
+
+/* ── QUESTION NAVIGATOR GRID ─────────────────────────────── */
 .quick-links-row {
   display: flex;
   justify-content: center;
