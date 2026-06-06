@@ -125,8 +125,9 @@ function navigate(page, pushState = false) {
     case 'level':     renderLevel();     break;
     case 'course':    renderCourse();    break;
     case 'chapter':   renderChapter();   break;
-    case 'dashboard': renderDashboard(); break;
-    case 'admin':     renderAdmin();     break;
+    case 'dashboard':    renderDashboard();       break;
+    case 'leaderboard':  renderLeaderboardPage(); break;
+    case 'admin':        renderAdmin();           break;
   }
   window.scrollTo(0, 0);
 }
@@ -180,7 +181,35 @@ function buildHeroStats() {
 // ============================================================
 //  HOME
 // ============================================================
-function renderHome() { setBreadcrumb(['Home']); }
+function renderHome() {
+  setBreadcrumb(['Home']);
+  const quickLinks = document.getElementById('home-quick-links');
+  if (!quickLinks) return;
+  if (_currentUser && _userProfile) {
+    const isAdmin = _currentUser.uid === window.ADMIN_UID;
+    quickLinks.innerHTML = `
+      <div class="quick-links-row">
+        <div class="quick-link-card" onclick="navigate('dashboard',true)">
+          <div class="ql-icon">📊</div>
+          <div class="ql-label">My Dashboard</div>
+          <div class="ql-sub">Your scores &amp; progress</div>
+        </div>
+        <div class="quick-link-card" onclick="navigate('leaderboard',true)">
+          <div class="ql-icon">🏆</div>
+          <div class="ql-label">Leaderboard</div>
+          <div class="ql-sub">Top students per course</div>
+        </div>
+        ${isAdmin ? `
+        <div class="quick-link-card admin-card" onclick="navigate('admin',true)">
+          <div class="ql-icon">🛡</div>
+          <div class="ql-label">Admin Panel</div>
+          <div class="ql-sub">All students &amp; attempts</div>
+        </div>` : ''}
+      </div>`;
+  } else {
+    quickLinks.innerHTML = '';
+  }
+}
 
 // ============================================================
 //  LEVELS PAGE
@@ -578,20 +607,21 @@ function openCBTConfigurator(chapters, sourceName, sourceId, defaultMode) {
     };
   });
 
-  // Q-count
-  let selectedQ = Math.min(20, totalQ);
+  // Q-count — hard cap at 40, never reveal total bank size
+  const MAX_Q    = 40;
+  const capTotal = Math.min(totalQ, MAX_Q);   // never exceeds 40
+  let selectedQ  = Math.min(20, capTotal);
   const presetRow = document.getElementById('q-preset-row');
   if (presetRow) {
     presetRow.innerHTML =
-      [10, 20, 40].filter(n => n <= totalQ).map(n =>
+      [10, 20, 30, 40].filter(n => n <= capTotal).map(n =>
         `<button class="q-preset${selectedQ === n ? ' active':''}" data-q="${n}" onclick="setQPreset(${n})">${n}</button>`
-      ).join('') +
-      `<button class="q-preset${selectedQ === totalQ ? ' active':''}" data-q="${totalQ}" onclick="setQPreset(${totalQ})">All (${totalQ})</button>`;
+      ).join('');
   }
   const qSlider = document.getElementById('q-count-slider');
   const qLabel  = document.getElementById('q-count-label');
   if (qSlider) {
-    qSlider.max = totalQ; qSlider.value = selectedQ;
+    qSlider.max = capTotal; qSlider.value = selectedQ;
     qSlider.oninput = () => {
       const v = parseInt(qSlider.value);
       if (qLabel) qLabel.textContent = v;
@@ -602,6 +632,7 @@ function openCBTConfigurator(chapters, sourceName, sourceId, defaultMode) {
   }
   if (qLabel) qLabel.textContent = selectedQ;
   modal._selectedQ = selectedQ;
+  modal._capTotal  = capTotal;   // store capped max for summary
 
   updateConfigTime(); updateConfigSummary();
   modal.classList.add('active');
@@ -660,8 +691,9 @@ function updateConfigSummary() {
   box.innerHTML = `
     <strong>${q}</strong> questions ·
     ${mode === 'practice' ? '<strong>Untimed</strong>' : `<strong>${time} minutes</strong>`} ·
-    ${mode === 'practice' ? '<strong>Practice</strong> (instant feedback)' : '<strong>Take Test</strong> (review at end)'}
-    <br>Source: ${modal._sourceName}`;
+    ${mode === 'practice'
+      ? '<strong>Practice</strong> — instant feedback after each question'
+      : '<strong>Take Test</strong> — review all answers at the end'}`;
 }
 
 window.launchCBTFromConfig = function() {
@@ -1082,16 +1114,20 @@ function renderNavAuth() {
   if (_currentUser && _userProfile) {
     const initials  = _userProfile.name.split(' ').map(n => n[0]).join('').slice(0,2).toUpperCase();
     const shortName = _userProfile.name.split(' ')[0];
+    // Sign In / Register buttons are gone — replaced entirely by the user chip
     area.innerHTML = `
       <div class="nav-user-chip" onclick="toggleUserDropdown()">
         <div class="nav-avatar">${initials}</div>
         <div class="nav-username">${shortName}</div>
       </div>`;
   } else {
+    // Not logged in — show auth buttons, hide user chip
     area.innerHTML = `
       <button class="nav-btn" onclick="openAuthModal('login')">Sign In</button>
       <button class="nav-btn primary" onclick="openAuthModal('register')">Register</button>`;
   }
+  // Re-render home quick-links whenever auth state changes
+  if (document.getElementById('page-home').classList.contains('active')) renderHome();
 }
 
 window.toggleUserDropdown = function() {
@@ -1295,6 +1331,68 @@ function renderLeaderboard(container, results) {
       </div>`;
   }
   container.innerHTML = html || `<p style="font-size:.8rem;color:var(--text-dim)">No leaderboard data yet.</p>`;
+}
+
+// ============================================================
+//  LEADERBOARD PAGE (standalone, linked from home)
+// ============================================================
+async function renderLeaderboardPage() {
+  setBreadcrumb(['Home', 'Leaderboard']);
+  const content = document.getElementById('leaderboard-page-content');
+  if (!content) return;
+
+  if (!_currentUser) {
+    content.innerHTML = `
+      <div class="empty-state" style="padding-top:3rem">
+        <div class="icon">🔒</div>
+        <p>Please <a href="#" onclick="openAuthModal('login');return false">sign in</a> to view the leaderboard.</p>
+      </div>`;
+    return;
+  }
+
+  content.innerHTML = `<div style="display:flex;justify-content:center;padding:3rem"><div class="spinner"></div></div>`;
+
+  try {
+    const snap = await _fb.get(_fb.ref(_db, 'leaderboard'));
+    if (!snap.exists()) {
+      content.innerHTML = `<div class="empty-state"><div class="icon">🏆</div><p>No leaderboard data yet. Complete a test to appear here!</p></div>`;
+      return;
+    }
+    const allSources = snap.val();
+    const rankColors = ['gold-r','silver-r','bronze-r','',''];
+    const rankIcons  = ['🥇','🥈','🥉','4','5'];
+    let html = '<div style="padding-top:2rem">';
+    for (const [sid, usersObj] of Object.entries(allSources)) {
+      const entries = Object.values(usersObj).sort((a,b) => b.score - a.score).slice(0,5);
+      if (!entries.length) continue;
+      html += `
+        <div class="dash-section">
+          <div class="dash-section-title">${entries[0].sourceName}</div>
+          <div class="leaderboard-list">
+            ${entries.map((e, i) => {
+              const initials = e.name ? e.name.split(' ').map(n=>n[0]).join('').slice(0,2).toUpperCase() : '??';
+              const isYou    = _currentUser && e.uid === _currentUser.uid;
+              const date     = e.createdAt ? new Date(e.createdAt).toLocaleDateString('en-GB',{day:'2-digit',month:'short'}) : '';
+              return `
+                <div class="lb-row">
+                  <div class="lb-rank ${rankColors[i]}">${rankIcons[i]}</div>
+                  <div style="display:flex;align-items:center;gap:.5rem;flex:1">
+                    <div class="nav-avatar" style="width:28px;height:28px;font-size:.6rem">${initials}</div>
+                    <div class="lb-name">${e.name} ${isYou ? '<span class="lb-you-tag">You</span>' : ''}</div>
+                  </div>
+                  <div class="lb-date">${date}</div>
+                  <div class="lb-score">${e.score}%</div>
+                </div>`;
+            }).join('')}
+          </div>
+        </div>`;
+    }
+    html += '</div>';
+    content.innerHTML = html;
+  } catch(e) {
+    content.innerHTML = `<div class="empty-state"><p>Could not load leaderboard. Check your connection.</p></div>`;
+    console.error(e);
+  }
 }
 
 // ============================================================
