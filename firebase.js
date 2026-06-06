@@ -13,7 +13,8 @@ const firebaseConfig = {
   projectId: "futa-online-class",
   storageBucket: "futa-online-class.firebasestorage.app",
   messagingSenderId: "446592599827",
-  appId: "1:446592599827:web:c75fa6533499364f263ce6"
+  appId: "1:446592599827:web:c75fa6533499364f263ce6",
+  databseURL: "https://futa-online-class-default-rtdb.firebaseio.com"
 };
 
 // ── 2. ADMIN UID ─────────────────────────────────────────────
