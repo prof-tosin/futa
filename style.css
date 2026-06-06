@@ -1374,6 +1374,42 @@ select.form-input option { background: var(--navy-2); }
 }
 @keyframes spin { to { transform: rotate(360deg); } }
 
+/* ── HOME QUICK LINKS (shown after login) ─────────────────── */
+.quick-links-row {
+  display: flex;
+  justify-content: center;
+  gap: 1rem;
+  flex-wrap: wrap;
+  margin: 0 auto 2.5rem;
+  max-width: 700px;
+}
+.quick-link-card {
+  background: var(--navy-2);
+  border: 1px solid rgba(201,153,58,.15);
+  border-radius: var(--radius-lg);
+  padding: 1.3rem 1.5rem;
+  min-width: 160px;
+  text-align: center;
+  cursor: pointer;
+  transition: border-color var(--transition), transform var(--transition), background var(--transition);
+  flex: 1;
+  max-width: 200px;
+}
+.quick-link-card:hover {
+  border-color: rgba(201,153,58,.4);
+  background: var(--navy-3);
+  transform: translateY(-3px);
+}
+.quick-link-card.admin-card {
+  border-color: rgba(224,92,92,.2);
+}
+.quick-link-card.admin-card:hover {
+  border-color: rgba(224,92,92,.5);
+}
+.ql-icon  { font-size: 1.6rem; margin-bottom: .45rem; }
+.ql-label { font-family: 'Playfair Display', serif; font-size: .95rem; font-weight: 600; color: var(--cream); margin-bottom: .25rem; }
+.ql-sub   { font-size: .75rem; color: var(--text-dim); }
+
 /* ── FOOTER ─────────────────────────────────────────────────── */
 .site-footer {
   border-top: 1px solid rgba(201,153,58,.1);
