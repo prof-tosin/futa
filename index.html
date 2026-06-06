@@ -58,6 +58,8 @@
     <div class="hero-stats" id="hero-stats">
       <!-- Filled by app.js -->
     </div>
+    <!-- Quick links: shown after login (Dashboard, Leaderboard, Admin) -->
+    <div id="home-quick-links"></div>
     <button class="btn-get-started" onclick="navigate('levels',true)">
       <i class="fa-solid fa-graduation-cap"></i>
       Browse Courses
@@ -202,6 +204,29 @@
     </div>
     <div id="chapter-detail-content">
       <!-- Rendered by app.js renderChapter() -->
+    </div>
+  </div>
+</div>
+
+
+<!-- ══════════════════════════════════════════════════════════
+     PAGE: LEADERBOARD
+═══════════════════════════════════════════════════════════ -->
+<div class="page" id="page-leaderboard">
+  <div class="page-header">
+    <div class="page-header-tag">Rankings</div>
+    <h2>Leaderboard</h2>
+    <p>Top 5 students per course. Best score wins.</p>
+    <div class="page-header-rule"></div>
+  </div>
+  <div class="container">
+    <div style="margin-top:1.5rem">
+      <button class="back-btn" onclick="navigate('home')">
+        <i class="fa-solid fa-arrow-left"></i> Home
+      </button>
+    </div>
+    <div id="leaderboard-page-content">
+      <!-- Rendered by app.js renderLeaderboardPage() -->
     </div>
   </div>
 </div>
