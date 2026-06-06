@@ -1,82 +1,87 @@
 // ============================================================
 //  app.js  —  FUTA Online Class
-//  Full rewrite: Phase 1 (CBT configurator, combining) +
-//                Phase 2 (Firebase auth, cloud storage,
-//                         dashboard, leaderboard, admin)
+//  Phase 1: CBT configurator, combining
+//  Phase 2: Firebase Auth + Realtime Database (no billing needed)
 //
-//  Load order:  firebase.js → registry.js → course files
-//               → data.js → [firebase SDK scripts] → app.js
+//  Load order: firebase.js → registry.js → courses → data.js → app.js
 // ============================================================
 
 'use strict';
 
-// ── FIREBASE INSTANCES (set after SDK loads) ──────────────────
-let _auth = null;
-let _db   = null;
-let _currentUser = null;   // Firebase User object or null
-let _userProfile = null;   // Firestore profile doc or null
+// ── FIREBASE INSTANCES ────────────────────────────────────────
+let _auth        = null;
+let _db          = null;   // Realtime Database instance
+let _currentUser = null;
+let _userProfile = null;
 
 // ── ROUTER STATE ──────────────────────────────────────────────
-let _state = {
-  level:   null,   // level id string
-  course:  null,   // course id string
-  chapter: null,   // chapter index (number)
-};
+let _state = { level: null, course: null, chapter: null };
 
 // ── CBT SESSION STATE ─────────────────────────────────────────
 let _cbt = {
-  questions:    [],
-  current:      0,
-  answers:      [],   // { selected, correct }
-  mode:         'practice',   // 'practice' | 'test'
-  timeLimit:    0,    // seconds (0 = untimed)
-  timerHandle:  null,
-  timeLeft:     0,
-  sourceName:   '',   // e.g. "ENT 301 — Chapter 1"
-  sourceId:     '',   // used for leaderboard key
+  questions: [], current: 0, answers: [],
+  mode: 'practice', timeLimit: 0,
+  timerHandle: null, timeLeft: 0,
+  sourceName: '', sourceId: '',
 };
 
 // ── COMBINE STATE ─────────────────────────────────────────────
-let _combineChapters = new Set();   // chapter indices (string "courseId-chIdx")
-let _combineCourses  = new Set();   // course ids
+let _combineChapters = new Set();
+let _combineCourses  = new Set();
 let _combineMode     = false;
 
 // ============================================================
-//  FIREBASE INIT
+//  FIREBASE INIT  (Auth + Realtime Database)
 // ============================================================
 async function initFirebase() {
-  if (!window.FIREBASE_CONFIG || window.FIREBASE_CONFIG.apiKey === 'PASTE_YOUR_API_KEY_HERE') {
-    console.warn('[FUTA] firebase.js not configured — running without cloud features.');
+  if (!window.FIREBASE_CONFIG ||
+      window.FIREBASE_CONFIG.apiKey === 'PASTE_YOUR_API_KEY_HERE') {
+    console.warn('[FUTA] firebase.js not configured — cloud features disabled.');
     return;
   }
   try {
-    const { initializeApp }        = await import('https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js');
-    const { getAuth, onAuthStateChanged, createUserWithEmailAndPassword,
-            signInWithEmailAndPassword, signOut }
-                                   = await import('https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js');
-    const { getFirestore, doc, getDoc, setDoc, addDoc, collection,
-            query, where, orderBy, limit, getDocs, serverTimestamp }
-                                   = await import('https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js');
+    const { initializeApp } =
+      await import('https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js');
+
+    const { getAuth, onAuthStateChanged,
+            createUserWithEmailAndPassword,
+            signInWithEmailAndPassword, signOut } =
+      await import('https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js');
+
+    const { getDatabase, ref, set, get, push,
+            query, orderByChild, limitToLast, equalTo } =
+      await import('https://www.gstatic.com/firebasejs/10.12.2/firebase-database.js');
 
     const app = initializeApp(window.FIREBASE_CONFIG);
     _auth = getAuth(app);
-    _db   = getFirestore(app);
+    _db   = getDatabase(app);
 
-    // Attach helpers to avoid re-importing
-    window._fb = { createUserWithEmailAndPassword, signInWithEmailAndPassword, signOut,
-                   doc, getDoc, setDoc, addDoc, collection, query, where, orderBy,
-                   limit, getDocs, serverTimestamp };
+    // Attach RTDB helpers globally so all functions can use them
+    window._fb = {
+      // Auth
+      createUserWithEmailAndPassword,
+      signInWithEmailAndPassword,
+      signOut,
+      // RTDB
+      ref, set, get, push,
+      query, orderByChild, limitToLast, equalTo,
+    };
 
     onAuthStateChanged(_auth, async user => {
       _currentUser = user;
       if (user) {
-        const snap = await _fb.getDoc(_fb.doc(_db, 'users', user.uid));
-        _userProfile = snap.exists() ? snap.data() : null;
+        try {
+          const snap = await _fb.get(_fb.ref(_db, `users/${user.uid}`));
+          _userProfile = snap.exists() ? snap.val() : null;
+        } catch (e) {
+          _userProfile = null;
+        }
       } else {
         _userProfile = null;
       }
       renderNavAuth();
     });
+
   } catch (e) {
     console.error('[FUTA] Firebase init error:', e);
   }
@@ -98,19 +103,11 @@ function handleHash() {
   const h = location.hash.replace('#', '');
   if (!h) { navigate('home'); return; }
   const parts = h.split('/');
-  if (parts[0] === 'level' && parts[1]) {
-    _state.level = parts[1];
-    navigate('level');
-  } else if (parts[0] === 'course' && parts[1]) {
-    _state.course = parts[1];
-    navigate('course');
-  } else if (parts[0] === 'chapter' && parts[1]) {
-    _state.course  = parts[1];
-    _state.chapter = parseInt(parts[2], 10);
-    navigate('chapter');
-  } else {
-    navigate('home');
-  }
+  if      (parts[0] === 'level'   && parts[1]) { _state.level = parts[1]; navigate('level'); }
+  else if (parts[0] === 'course'  && parts[1]) { _state.course = parts[1]; navigate('course'); }
+  else if (parts[0] === 'chapter' && parts[1]) {
+    _state.course = parts[1]; _state.chapter = parseInt(parts[2], 10); navigate('chapter');
+  } else { navigate('home'); }
 }
 
 // ============================================================
@@ -121,19 +118,15 @@ function navigate(page, pushState = false) {
   const el = document.getElementById('page-' + page);
   if (!el) return;
   el.classList.add('active');
-
-  if (pushState) {
-    history.pushState(null, '', '#' + buildHash(page));
-  }
-
+  if (pushState) history.pushState(null, '', '#' + buildHash(page));
   switch (page) {
-    case 'home':    renderHome();    break;
-    case 'levels':  renderLevels();  break;
-    case 'level':   renderLevel();   break;
-    case 'course':  renderCourse();  break;
-    case 'chapter': renderChapter(); break;
+    case 'home':      renderHome();      break;
+    case 'levels':    renderLevels();    break;
+    case 'level':     renderLevel();     break;
+    case 'course':    renderCourse();    break;
+    case 'chapter':   renderChapter();   break;
     case 'dashboard': renderDashboard(); break;
-    case 'admin':   renderAdmin();   break;
+    case 'admin':     renderAdmin();     break;
   }
   window.scrollTo(0, 0);
 }
@@ -148,29 +141,10 @@ function buildHash(page) {
   }
 }
 
-function goLevel(levelId) {
-  _state.level = levelId;
-  _combineChapters.clear();
-  _combineCourses.clear();
-  _combineMode = false;
-  navigate('level', true);
-}
-window.goLevel = goLevel;
-
-function goCourse(courseId) {
-  _state.course = courseId;
-  _combineChapters.clear();
-  _combineMode = false;
-  navigate('course', true);
-}
-window.goCourse = goCourse;
-
-function goChapter(courseId, chIdx) {
-  _state.course  = courseId;
-  _state.chapter = chIdx;
-  navigate('chapter', true);
-}
-window.goChapter = goChapter;
+function goLevel(levelId)        { _state.level = levelId; _combineChapters.clear(); _combineCourses.clear(); _combineMode = false; navigate('level', true); }
+function goCourse(courseId)      { _state.course = courseId; _combineChapters.clear(); _combineMode = false; navigate('course', true); }
+function goChapter(courseId, idx){ _state.course = courseId; _state.chapter = idx; navigate('chapter', true); }
+window.goLevel = goLevel; window.goCourse = goCourse; window.goChapter = goChapter;
 
 // ============================================================
 //  BREADCRUMB
@@ -189,9 +163,8 @@ function setBreadcrumb(parts) {
 //  HERO STATS
 // ============================================================
 function buildHeroStats() {
-  const courses  = Object.keys(window.COURSES || {}).length;
-  let   chapters = 0;
-  let   questions = 0;
+  const courses   = Object.keys(window.COURSES || {}).length;
+  let chapters = 0, questions = 0;
   for (const c of Object.values(window.COURSES || {})) {
     chapters  += (c.chapters || []).length;
     questions += window.courseQuestionCount(c);
@@ -201,16 +174,13 @@ function buildHeroStats() {
   el.innerHTML = `
     <div class="hero-stat"><span class="n">${courses}</span><span class="l">Courses</span></div>
     <div class="hero-stat"><span class="n">${chapters}</span><span class="l">Chapters</span></div>
-    <div class="hero-stat"><span class="n">${questions.toLocaleString()}</span><span class="l">Questions</span></div>
-  `;
+    <div class="hero-stat"><span class="n">${questions.toLocaleString()}</span><span class="l">Questions</span></div>`;
 }
 
 // ============================================================
 //  HOME
 // ============================================================
-function renderHome() {
-  setBreadcrumb(['Home']);
-}
+function renderHome() { setBreadcrumb(['Home']); }
 
 // ============================================================
 //  LEVELS PAGE
@@ -219,26 +189,19 @@ function renderLevels() {
   setBreadcrumb(['Home', 'Levels']);
   const grid = document.getElementById('level-grid');
   if (!grid) return;
-
+  const accentMap = { purple:'#7F77DD', blue:'#378ADD', teal:'#1D9E75', amber:'#BA7517', coral:'#D85A30', pink:'#D4537E' };
   grid.innerHTML = window.LEVELS.map(lv => {
-    const courses   = (window.BY_LEVEL[lv.id] || []);
-    const courseCount = courses.length;
+    const courses = window.BY_LEVEL[lv.id] || [];
     let qTotal = 0;
     courses.forEach(c => { qTotal += window.courseQuestionCount(c); });
-
-    const accentMap = {
-      purple: '#7F77DD', blue: '#378ADD', teal: '#1D9E75',
-      amber: '#BA7517', coral: '#D85A30', pink: '#D4537E'
-    };
     const accent = accentMap[lv.color] || '#c9993a';
-
     return `
       <div class="level-card" style="--level-accent:${accent}" onclick="goLevel('${lv.id}')">
         <div class="level-card-label">${lv.label}</div>
         <h3>${lv.fullName}</h3>
         <p>${lv.desc}</p>
         <div class="level-card-stats">
-          <span class="level-stat"><strong>${courseCount}</strong> course${courseCount !== 1 ? 's' : ''}</span>
+          <span class="level-stat"><strong>${courses.length}</strong> course${courses.length !== 1 ? 's' : ''}</span>
           ${qTotal > 0 ? `<span class="level-stat"><strong>${qTotal.toLocaleString()}</strong> questions</span>` : ''}
         </div>
       </div>`;
@@ -246,49 +209,35 @@ function renderLevels() {
 }
 
 // ============================================================
-//  LEVEL PAGE (courses by semester)
+//  LEVEL PAGE
 // ============================================================
 function renderLevel() {
   const level = window.LEVELS.find(l => l.id === _state.level);
   if (!level) { navigate('levels'); return; }
-
   setBreadcrumb(['Home', 'Levels', level.fullName]);
 
-  const titleEl = document.getElementById('level-title');
-  const tagEl   = document.getElementById('level-tag');
-  const descEl  = document.getElementById('level-desc');
-  if (titleEl) titleEl.textContent = level.fullName;
-  if (tagEl)   tagEl.textContent   = level.label;
-  if (descEl)  descEl.textContent  = level.desc;
-
-  document.getElementById('course-back-btn') &&
-    (document.getElementById('course-back-btn').onclick = () => navigate('levels', true));
+  const el = (id) => document.getElementById(id);
+  if (el('level-title')) el('level-title').textContent = level.fullName;
+  if (el('level-tag'))   el('level-tag').textContent   = level.label;
+  if (el('level-desc'))  el('level-desc').textContent  = level.desc;
+  const backBtn = el('course-back-btn');
+  if (backBtn) backBtn.onclick = () => navigate('levels', true);
 
   const courses = window.BY_LEVEL[level.id] || [];
-  const content = document.getElementById('course-content');
+  const content = el('course-content');
   if (!content) return;
 
   if (courses.length === 0) {
     content.innerHTML = `
       <div class="empty-state" style="padding-top:3rem">
         <div class="icon">📚</div>
-        <p>No course content has been added for this level yet.<br>
-        Check back soon as we build it out.</p>
+        <p>No course content has been added for this level yet. Check back soon.</p>
       </div>`;
     return;
   }
 
-  // Group by semester
-  const bySem = {};
-  courses.forEach(c => {
-    const s = c.semester || '1';
-    if (!bySem[s]) bySem[s] = [];
-    bySem[s].push(c);
-  });
-
   let html = '';
 
-  // Course combine bar (only for allowCombine levels)
   if (level.allowCombine && courses.length >= 2) {
     html += `
       <div style="display:flex;align-items:center;gap:.8rem;margin-top:1.5rem;margin-bottom:.5rem;flex-wrap:wrap;">
@@ -298,12 +247,7 @@ function renderLevel() {
           Combine courses for CBT
         </label>
         <span style="font-size:.75rem;color:var(--text-dim)">Select courses below, then launch combined CBT</span>
-      </div>`;
-  }
-
-  // Course combine launch bar
-  if (level.allowCombine) {
-    html += `
+      </div>
       <div class="combine-bar" id="combine-courses-bar">
         <div class="combine-bar-info">
           <strong id="combine-courses-count">0 courses</strong> selected —
@@ -314,21 +258,21 @@ function renderLevel() {
       </div>`;
   }
 
-  // Render courses grouped by semester
+  const bySem = {};
+  courses.forEach(c => { const s = c.semester || '1'; if (!bySem[s]) bySem[s] = []; bySem[s].push(c); });
+
   for (const [sem, semCourses] of Object.entries(bySem)) {
     html += `<div class="semester-section">
       <div class="semester-label">${window.SEMESTER_LABELS[sem] || `Semester ${sem}`}</div>
-      <div class="course-grid" id="course-grid-${sem}">`;
-
+      <div class="course-grid">`;
     for (const c of semCourses) {
-      const qCount = window.courseQuestionCount(c);
+      const qCount  = window.courseQuestionCount(c);
       const chCount = (c.chapters || []).length;
       html += `
         <div class="course-card" id="course-card-${c.id}" onclick="handleCourseCardClick(event,'${c.id}')">
           <div class="combine-check-wrap" id="combine-check-wrap-${c.id}" style="display:none">
             <input type="checkbox" class="combine-check" id="combine-check-${c.id}"
-              onclick="event.stopPropagation()"
-              onchange="toggleCourseSelect('${c.id}')">
+              onclick="event.stopPropagation()" onchange="toggleCourseSelect('${c.id}')">
           </div>
           <div class="course-card-code">${c.code || c.id.toUpperCase()}</div>
           <h4>${c.title}</h4>
@@ -340,23 +284,9 @@ function renderLevel() {
     }
     html += `</div></div>`;
   }
-
   content.innerHTML = html;
 }
 window.renderLevel = renderLevel;
-
-function handleCourseCardClick(evt, courseId) {
-  if (_combineMode && evt.target.tagName !== 'INPUT') {
-    // Toggle checkbox via card click
-    const cb = document.getElementById('combine-check-' + courseId);
-    if (cb) { cb.checked = !cb.checked; toggleCourseSelect(courseId); }
-    return;
-  }
-  if (!_combineMode) goCourse(courseId);
-}
-window.handleCourseCardClick = handleCombineCourseCheckboxChange;
-
-function handleCombineCourseCheckboxChange(){}  // overridden below
 
 window.handleCourseCardClick = function(evt, courseId) {
   if (_combineMode && evt.target.tagName !== 'INPUT') {
@@ -368,15 +298,10 @@ window.handleCourseCardClick = function(evt, courseId) {
 };
 
 function toggleCombineCourseMode(on) {
-  _combineMode = on;
-  _combineCourses.clear();
-  document.querySelectorAll('[id^="combine-check-wrap-"]').forEach(el => {
-    el.style.display = on ? 'flex' : 'none';
-  });
-  document.querySelectorAll('[id^="course-card-"]').forEach(el => {
-    el.classList.toggle('combine-mode', on);
-  });
-  document.querySelectorAll('.combine-check').forEach(cb => { cb.checked = false; });
+  _combineMode = on; _combineCourses.clear();
+  document.querySelectorAll('[id^="combine-check-wrap-"]').forEach(el => el.style.display = on ? 'flex' : 'none');
+  document.querySelectorAll('[id^="course-card-"]').forEach(el => el.classList.toggle('combine-mode', on));
+  document.querySelectorAll('.combine-check').forEach(cb => cb.checked = false);
   updateCombineCoursesBar();
 }
 window.toggleCombineCourseMode = toggleCombineCourseMode;
@@ -384,8 +309,7 @@ window.toggleCombineCourseMode = toggleCombineCourseMode;
 function toggleCourseSelect(courseId) {
   const cb = document.getElementById('combine-check-' + courseId);
   if (!cb) return;
-  if (cb.checked) _combineCourses.add(courseId);
-  else            _combineCourses.delete(courseId);
+  cb.checked ? _combineCourses.add(courseId) : _combineCourses.delete(courseId);
   updateCombineCoursesBar();
 }
 window.toggleCourseSelect = toggleCourseSelect;
@@ -395,58 +319,45 @@ function updateCombineCoursesBar() {
   if (!bar) return;
   const n = _combineCourses.size;
   let qTotal = 0;
-  _combineCourses.forEach(cid => {
-    const c = window.COURSES[cid];
-    if (c) qTotal += window.courseQuestionCount(c);
-  });
-  document.getElementById('combine-courses-count').textContent =
-    `${n} course${n !== 1 ? 's' : ''}`;
-  document.getElementById('combine-courses-q-count').textContent =
-    `${qTotal.toLocaleString()} questions`;
+  _combineCourses.forEach(cid => { const c = window.COURSES[cid]; if (c) qTotal += window.courseQuestionCount(c); });
+  const countEl = document.getElementById('combine-courses-count');
+  const qEl     = document.getElementById('combine-courses-q-count');
+  if (countEl) countEl.textContent = `${n} course${n !== 1 ? 's' : ''}`;
+  if (qEl)     qEl.textContent     = `${qTotal.toLocaleString()} questions`;
   bar.classList.toggle('visible', n >= 2);
 }
 
 function launchCombinedCourseCBT(defaultMode) {
   if (_combineCourses.size < 2) return;
-  const chapters = [];
-  const names    = [];
+  const chapters = [], names = [];
   _combineCourses.forEach(cid => {
     const c = window.COURSES[cid];
-    if (c) {
-      (c.chapters || []).forEach(ch => chapters.push(ch));
-      names.push(c.code || c.title);
-    }
+    if (c) { (c.chapters || []).forEach(ch => chapters.push(ch)); names.push(c.code || c.title); }
   });
-  const sourceName = names.join(' + ');
-  const sourceId   = [..._combineCourses].sort().join('+');
-  openCBTConfigurator(chapters, sourceName, sourceId, defaultMode);
+  openCBTConfigurator(chapters, names.join(' + '), [..._combineCourses].sort().join('+'), defaultMode);
 }
 window.launchCombinedCourseCBT = launchCombinedCourseCBT;
 
 // ============================================================
-//  COURSE PAGE (chapters)
+//  COURSE PAGE
 // ============================================================
 function renderCourse() {
   const course = window.COURSES[_state.course];
   if (!course) { navigate('levels'); return; }
-
   const level = window.LEVELS.find(l => l.id === course.level);
   setBreadcrumb(['Home', 'Levels', level ? level.fullName : '...', course.code || course.title]);
 
-  const tagEl   = document.getElementById('course-tag');
-  const titleEl = document.getElementById('course-title');
-  const descEl  = document.getElementById('course-desc');
-  const backBtn = document.getElementById('course-back-btn');
-  if (tagEl)   tagEl.textContent   = course.code || '';
-  if (titleEl) titleEl.textContent = course.title;
-  if (descEl)  descEl.textContent  = course.description || '';
-  if (backBtn) backBtn.onclick = () => { navigate('level', true); };
+  const el = (id) => document.getElementById(id);
+  if (el('course-tag'))     el('course-tag').textContent     = course.code || '';
+  if (el('course-title'))   el('course-title').textContent   = course.title;
+  if (el('course-desc'))    el('course-desc').textContent    = course.description || '';
+  const back = el('course-back-btn') || el('course-back-btn-2');
+  if (back) back.onclick = () => navigate('level', true);
 
-  _combineChapters.clear();
-  _combineMode = false;
+  _combineChapters.clear(); _combineMode = false;
 
   const chapters = course.chapters || [];
-  const content  = document.getElementById('chapter-content');
+  const content  = el('chapter-content');
   if (!content) return;
 
   if (chapters.length === 0) {
@@ -455,7 +366,6 @@ function renderCourse() {
   }
 
   const totalQ = window.courseQuestionCount(course);
-
   let html = `
     <div style="display:flex;align-items:center;gap:.8rem;margin-top:1.5rem;margin-bottom:.5rem;flex-wrap:wrap;">
       <label style="display:flex;align-items:center;gap:.5rem;font-size:.82rem;color:var(--text-muted);cursor:pointer;">
@@ -465,7 +375,6 @@ function renderCourse() {
       </label>
       <span style="font-size:.75rem;color:var(--text-dim)">Select chapters below, then launch combined CBT</span>
     </div>
-
     <div class="combine-bar" id="combine-chapters-bar">
       <div class="combine-bar-info">
         <strong id="combine-ch-count">0 chapters</strong> selected —
@@ -474,18 +383,16 @@ function renderCourse() {
       <button class="btn-action btn-practice" onclick="launchCombinedChapterCBT('practice')">Practice CBT</button>
       <button class="btn-action btn-test"     onclick="launchCombinedChapterCBT('test')">Take Test</button>
     </div>
-
     <div class="chapter-list" style="margin-top:1rem;">`;
 
   chapters.forEach((ch, idx) => {
     const qCount = window.chapterQuestionCount(ch);
     html += `
       <div class="chapter-row" id="chapter-row-${idx}">
-        <div class="chapter-row-head" onclick="handleChapterRowClick(event, '${course.id}', ${idx})">
+        <div class="chapter-row-head" onclick="handleChapterRowClick(event,'${course.id}',${idx})">
           <div class="chapter-combine-check-wrap" id="ch-check-wrap-${idx}" style="display:none">
             <input type="checkbox" class="combine-check" id="ch-check-${idx}"
-              onclick="event.stopPropagation()"
-              onchange="toggleChapterSelect(${idx})">
+              onclick="event.stopPropagation()" onchange="toggleChapterSelect(${idx})">
           </div>
           <div class="chapter-num">Ch.${idx + 1}</div>
           <h4>${ch.title}</h4>
@@ -500,7 +407,6 @@ function renderCourse() {
   });
 
   html += `</div>
-
     <div style="margin-top:1.5rem;display:flex;gap:.75rem;flex-wrap:wrap">
       <button class="btn-action btn-practice" onclick="openCourseCBT('${course.id}','practice')">
         Practice Full Course (${totalQ} Qs)
@@ -523,7 +429,6 @@ window.handleChapterRowClick = function(evt, courseId, idx) {
     const actions = document.getElementById('ch-actions-' + idx);
     if (actions) {
       const open = actions.style.display === 'flex';
-      // close all
       document.querySelectorAll('[id^="ch-actions-"]').forEach(a => a.style.display = 'none');
       if (!open) actions.style.display = 'flex';
     }
@@ -531,138 +436,117 @@ window.handleChapterRowClick = function(evt, courseId, idx) {
 };
 
 function toggleCombineChapterMode(on) {
-  _combineMode = on;
-  _combineChapters.clear();
-  document.querySelectorAll('[id^="ch-check-wrap-"]').forEach(el => {
-    el.style.display = on ? 'flex' : 'none';
-  });
-  document.querySelectorAll('[id^="chapter-row-"]').forEach(el => {
-    el.classList.toggle('combine-mode', on);
-  });
-  document.querySelectorAll('.combine-check').forEach(cb => { cb.checked = false; });
+  _combineMode = on; _combineChapters.clear();
+  document.querySelectorAll('[id^="ch-check-wrap-"]').forEach(el => el.style.display = on ? 'flex' : 'none');
+  document.querySelectorAll('[id^="chapter-row-"]').forEach(el => el.classList.toggle('combine-mode', on));
+  document.querySelectorAll('.combine-check').forEach(cb => cb.checked = false);
   updateCombineChaptersBar();
 }
 window.toggleCombineChapterMode = toggleCombineChapterMode;
 
 function toggleChapterSelect(idx) {
-  const cb = document.getElementById('ch-check-' + idx);
+  const cb  = document.getElementById('ch-check-' + idx);
   if (!cb) return;
   const key = `${_state.course}-${idx}`;
-  if (cb.checked) _combineChapters.add(key);
-  else            _combineChapters.delete(key);
+  cb.checked ? _combineChapters.add(key) : _combineChapters.delete(key);
   updateCombineChaptersBar();
 }
 window.toggleChapterSelect = toggleChapterSelect;
 
 function updateCombineChaptersBar() {
-  const bar = document.getElementById('combine-chapters-bar');
+  const bar    = document.getElementById('combine-chapters-bar');
   if (!bar) return;
   const course = window.COURSES[_state.course];
-  const n = _combineChapters.size;
-  let qTotal = 0;
+  const n      = _combineChapters.size;
+  let qTotal   = 0;
   _combineChapters.forEach(key => {
     const idx = parseInt(key.split('-').pop(), 10);
     const ch  = course && course.chapters && course.chapters[idx];
     if (ch) qTotal += window.chapterQuestionCount(ch);
   });
-  document.getElementById('combine-ch-count').textContent = `${n} chapter${n !== 1 ? 's' : ''}`;
-  document.getElementById('combine-ch-q-count').textContent = `${qTotal.toLocaleString()} questions`;
+  const countEl = document.getElementById('combine-ch-count');
+  const qEl     = document.getElementById('combine-ch-q-count');
+  if (countEl) countEl.textContent = `${n} chapter${n !== 1 ? 's' : ''}`;
+  if (qEl)     qEl.textContent     = `${qTotal.toLocaleString()} questions`;
   bar.classList.toggle('visible', n >= 2);
 }
 
 function launchCombinedChapterCBT(defaultMode) {
   const course = window.COURSES[_state.course];
   if (!course || _combineChapters.size < 2) return;
-  const chapters = [];
-  const chNums   = [];
+  const chapters = [], chNums = [];
   _combineChapters.forEach(key => {
     const idx = parseInt(key.split('-').pop(), 10);
     const ch  = course.chapters[idx];
     if (ch) { chapters.push(ch); chNums.push(idx + 1); }
   });
   chNums.sort((a, b) => a - b);
-  const sourceName = `${course.code || course.title} — Chapters ${chNums.join(', ')}`;
-  const sourceId   = `${course.id}_ch_${chNums.join('_')}`;
-  openCBTConfigurator(chapters, sourceName, sourceId, defaultMode);
+  openCBTConfigurator(
+    chapters,
+    `${course.code || course.title} — Chapters ${chNums.join(', ')}`,
+    `${course.id}_ch_${chNums.join('_')}`,
+    defaultMode
+  );
 }
 window.launchCombinedChapterCBT = launchCombinedChapterCBT;
 
 function openChapterCBT(courseId, chIdx, defaultMode) {
-  const course = window.COURSES[courseId];
-  if (!course) return;
-  const ch = course.chapters[chIdx];
-  if (!ch) return;
-  const sourceName = `${course.code || course.title} — ${ch.title}`;
-  const sourceId   = `${courseId}_ch${chIdx}`;
-  openCBTConfigurator([ch], sourceName, sourceId, defaultMode);
+  const course = window.COURSES[courseId]; if (!course) return;
+  const ch     = course.chapters[chIdx];  if (!ch)     return;
+  openCBTConfigurator([ch], `${course.code || course.title} — ${ch.title}`, `${courseId}_ch${chIdx}`, defaultMode);
 }
 window.openChapterCBT = openChapterCBT;
 
 function openCourseCBT(courseId, defaultMode) {
-  const course = window.COURSES[courseId];
-  if (!course) return;
-  const sourceName = `${course.code || course.title} — Full Course`;
-  const sourceId   = `${courseId}_full`;
-  openCBTConfigurator(course.chapters || [], sourceName, sourceId, defaultMode);
+  const course = window.COURSES[courseId]; if (!course) return;
+  openCBTConfigurator(course.chapters || [], `${course.code || course.title} — Full Course`, `${courseId}_full`, defaultMode);
 }
 window.openCourseCBT = openCourseCBT;
 
 // ============================================================
-//  CHAPTER DETAIL PAGE
+//  CHAPTER DETAIL
 // ============================================================
 function renderChapter() {
   const course = window.COURSES[_state.course];
   if (!course) { navigate('levels'); return; }
   const ch = (course.chapters || [])[_state.chapter];
-  if (!ch) { navigate('course', true); return; }
+  if (!ch)  { navigate('course', true); return; }
 
   const level = window.LEVELS.find(l => l.id === course.level);
   setBreadcrumb(['Home', 'Levels', level ? level.label : '...', course.code, `Ch.${_state.chapter + 1}`]);
 
-  const tagEl   = document.getElementById('chapter-tag');
-  const titleEl = document.getElementById('chapter-title');
-  const backBtn = document.getElementById('chapter-back-btn');
-  if (tagEl)   tagEl.textContent   = `${course.code || course.id.toUpperCase()} — Chapter ${_state.chapter + 1}`;
-  if (titleEl) titleEl.textContent = ch.title;
-  if (backBtn) backBtn.onclick = () => navigate('course', true);
+  const el = (id) => document.getElementById(id);
+  if (el('chapter-tag'))   el('chapter-tag').textContent   = `${course.code || course.id.toUpperCase()} — Chapter ${_state.chapter + 1}`;
+  if (el('chapter-title')) el('chapter-title').textContent = ch.title;
+  const back = el('chapter-back-btn');
+  if (back) back.onclick = () => navigate('course', true);
 
-  const qCount = window.chapterQuestionCount(ch);
-  const content = document.getElementById('chapter-detail-content');
+  const qCount  = window.chapterQuestionCount(ch);
+  const content = el('chapter-detail-content');
   if (!content) return;
 
-  let keyPointsHtml = '';
-  if (ch.keyPoints && ch.keyPoints.length) {
-    keyPointsHtml = `
-      <div class="summary-section">
-        <h4>Key Points</h4>
-        <ul class="key-points-list">
-          ${ch.keyPoints.map(p => `<li>${p}</li>`).join('')}
-        </ul>
-      </div>`;
-  }
+  const keyPointsHtml = ch.keyPoints && ch.keyPoints.length
+    ? `<div class="summary-section">
+         <h4>Key Points</h4>
+         <ul class="key-points-list">
+           ${ch.keyPoints.map(p => `<li>${p}</li>`).join('')}
+         </ul>
+       </div>` : '';
 
   content.innerHTML = `
     <div class="chapter-detail-header" style="margin-top:1.5rem">
       <h3>${ch.title}</h3>
       <p>${qCount} practice questions available</p>
       <div class="chapter-cbt-bar">
-        <button class="btn-action btn-practice" onclick="openChapterCBT('${course.id}',${_state.chapter},'practice')">
-          Practice CBT
-        </button>
-        <button class="btn-action btn-test" onclick="openChapterCBT('${course.id}',${_state.chapter},'test')">
-          Take Test
-        </button>
+        <button class="btn-action btn-practice" onclick="openChapterCBT('${course.id}',${_state.chapter},'practice')">Practice CBT</button>
+        <button class="btn-action btn-test"     onclick="openChapterCBT('${course.id}',${_state.chapter},'test')">Take Test</button>
       </div>
     </div>
-
     <div class="summary-section" style="margin-top:1.5rem">
       <h4>Chapter Summary</h4>
-      ${(ch.summary || 'Summary coming soon.').split('\n\n').map(p =>
-        `<p>${p.trim()}</p>`).join('')}
+      ${(ch.summary || 'Summary coming soon.').split('\n\n').map(p => `<p>${p.trim()}</p>`).join('')}
     </div>
-
-    ${keyPointsHtml}
-  `;
+    ${keyPointsHtml}`;
 }
 
 // ============================================================
@@ -671,23 +555,16 @@ function renderChapter() {
 function openCBTConfigurator(chapters, sourceName, sourceId, defaultMode) {
   let totalQ = 0;
   chapters.forEach(ch => { totalQ += (ch.questions || []).length; });
-
-  if (totalQ === 0) {
-    showToast('No questions available for this selection.', 'error');
-    return;
-  }
+  if (totalQ === 0) { showToast('No questions available for this selection.', 'error'); return; }
 
   const modal = document.getElementById('config-modal');
   if (!modal) return;
-
-  // Store for launch
   modal._chapters   = chapters;
   modal._sourceName = sourceName;
   modal._sourceId   = sourceId;
   modal._totalQ     = totalQ;
   modal._mode       = defaultMode || 'practice';
 
-  // Populate title
   document.getElementById('config-modal-title').textContent = sourceName;
 
   // Mode tabs
@@ -697,49 +574,36 @@ function openCBTConfigurator(chapters, sourceName, sourceId, defaultMode) {
     t.onclick = () => {
       modal._mode = t.dataset.mode;
       tabs.forEach(x => x.classList.toggle('active', x === t));
-      updateConfigTime();
-      updateConfigSummary();
+      updateConfigTime(); updateConfigSummary();
     };
   });
 
-  // Q-count presets
-  const presets   = [10, 20, 40];
+  // Q-count
+  let selectedQ = Math.min(20, totalQ);
   const presetRow = document.getElementById('q-preset-row');
-  let   selectedQ = Math.min(20, totalQ);
   if (presetRow) {
-    presetRow.innerHTML = presets.map(n =>
-      n <= totalQ
-        ? `<button class="q-preset${selectedQ === n ? ' active' : ''}" data-q="${n}"
-             onclick="setQPreset(${n})">${n}</button>`
-        : ''
-    ).join('') +
-      `<button class="q-preset${selectedQ === totalQ ? ' active' : ''}" data-q="${totalQ}"
-         onclick="setQPreset(${totalQ})">All (${totalQ})</button>`;
+    presetRow.innerHTML =
+      [10, 20, 40].filter(n => n <= totalQ).map(n =>
+        `<button class="q-preset${selectedQ === n ? ' active':''}" data-q="${n}" onclick="setQPreset(${n})">${n}</button>`
+      ).join('') +
+      `<button class="q-preset${selectedQ === totalQ ? ' active':''}" data-q="${totalQ}" onclick="setQPreset(${totalQ})">All (${totalQ})</button>`;
   }
-
   const qSlider = document.getElementById('q-count-slider');
   const qLabel  = document.getElementById('q-count-label');
   if (qSlider) {
-    qSlider.max   = totalQ;
-    qSlider.value = selectedQ;
+    qSlider.max = totalQ; qSlider.value = selectedQ;
     qSlider.oninput = () => {
       const v = parseInt(qSlider.value);
       if (qLabel) qLabel.textContent = v;
       modal._selectedQ = v;
-      document.querySelectorAll('.q-preset').forEach(b => {
-        b.classList.toggle('active', parseInt(b.dataset.q) === v);
-      });
-      updateConfigTime();
-      updateConfigSummary();
+      document.querySelectorAll('.q-preset').forEach(b => b.classList.toggle('active', parseInt(b.dataset.q) === v));
+      updateConfigTime(); updateConfigSummary();
     };
   }
   if (qLabel) qLabel.textContent = selectedQ;
   modal._selectedQ = selectedQ;
 
-  // Time presets
-  updateConfigTime();
-  updateConfigSummary();
-
+  updateConfigTime(); updateConfigSummary();
   modal.classList.add('active');
 }
 window.openCBTConfigurator = openCBTConfigurator;
@@ -751,34 +615,28 @@ window.setQPreset = function(n) {
   const label  = document.getElementById('q-count-label');
   if (slider) slider.value = n;
   if (label)  label.textContent = n;
-  document.querySelectorAll('.q-preset').forEach(b => {
-    b.classList.toggle('active', parseInt(b.dataset.q) === n);
-  });
-  updateConfigTime();
-  updateConfigSummary();
+  document.querySelectorAll('.q-preset').forEach(b => b.classList.toggle('active', parseInt(b.dataset.q) === n));
+  updateConfigTime(); updateConfigSummary();
 };
 
 function updateConfigTime() {
-  const modal      = document.getElementById('config-modal');
-  const timeRow    = document.getElementById('time-config-row');
-  const isPractice = modal && modal._mode === 'practice';
-  if (timeRow) timeRow.style.display = isPractice ? 'none' : 'block';
+  const modal   = document.getElementById('config-modal');
+  const timeRow = document.getElementById('time-config-row');
   if (!modal) return;
+  const isPractice = modal._mode === 'practice';
+  if (timeRow) timeRow.style.display = isPractice ? 'none' : 'block';
 
   const q       = modal._selectedQ || 20;
   const defMins = window.defaultTime(q);
-  const presets = [10, 20, 30, 45, 60];
-  const selected = modal._selectedTime || defMins;
-  modal._selectedTime = selected;
+  if (!modal._selectedTime) modal._selectedTime = defMins;
+  const selected = modal._selectedTime;
 
   const timeRow2 = document.getElementById('time-preset-row');
   if (timeRow2) {
     timeRow2.innerHTML =
-      `<button class="time-preset${selected === defMins ? ' active' : ''}" data-t="${defMins}"
-         onclick="setTimePreset(${defMins})">Default (${defMins} min)</button>` +
-      presets.filter(t => t !== defMins).map(t =>
-        `<button class="time-preset${selected === t ? ' active' : ''}" data-t="${t}"
-           onclick="setTimePreset(${t})">${t} min</button>`
+      `<button class="time-preset${selected === defMins ? ' active':''}" data-t="${defMins}" onclick="setTimePreset(${defMins})">Default (${defMins} min)</button>` +
+      [10, 20, 30, 45, 60].filter(t => t !== defMins).map(t =>
+        `<button class="time-preset${selected === t ? ' active':''}" data-t="${t}" onclick="setTimePreset(${t})">${t} min</button>`
       ).join('');
   }
 }
@@ -787,9 +645,7 @@ window.setTimePreset = function(mins) {
   const modal = document.getElementById('config-modal');
   if (!modal) return;
   modal._selectedTime = mins;
-  document.querySelectorAll('.time-preset').forEach(b => {
-    b.classList.toggle('active', parseInt(b.dataset.t) === mins);
-  });
+  document.querySelectorAll('.time-preset').forEach(b => b.classList.toggle('active', parseInt(b.dataset.t) === mins));
   updateConfigSummary();
 };
 
@@ -801,23 +657,20 @@ function updateConfigSummary() {
   const time = modal._selectedTime || window.defaultTime(q);
   const box  = document.getElementById('config-summary-box');
   if (!box) return;
-  const timeStr = mode === 'practice' ? '<strong>Untimed</strong>' : `<strong>${time} minutes</strong>`;
   box.innerHTML = `
-    <strong>${q}</strong> questions · ${timeStr} ·
+    <strong>${q}</strong> questions ·
+    ${mode === 'practice' ? '<strong>Untimed</strong>' : `<strong>${time} minutes</strong>`} ·
     ${mode === 'practice' ? '<strong>Practice</strong> (instant feedback)' : '<strong>Take Test</strong> (review at end)'}
-    <br>Source: ${modal._sourceName}
-  `;
+    <br>Source: ${modal._sourceName}`;
 }
 
 window.launchCBTFromConfig = function() {
   const modal = document.getElementById('config-modal');
   if (!modal || !modal._chapters) return;
   modal.classList.remove('active');
-
   const mode    = modal._mode || 'practice';
   const q       = modal._selectedQ || modal._totalQ;
   const timeMins = mode === 'test' ? (modal._selectedTime || window.defaultTime(q)) : 0;
-
   startCBT(modal._chapters, mode, q, timeMins * 60, modal._sourceName, modal._sourceId);
 };
 
@@ -826,67 +679,55 @@ window.launchCBTFromConfig = function() {
 // ============================================================
 function startCBT(chapters, mode, qLimit, timeSecs, sourceName, sourceId) {
   const questions = window.poolQuestions(chapters, qLimit);
-  if (questions.length === 0) { showToast('No questions available.', 'error'); return; }
+  if (!questions.length) { showToast('No questions available.', 'error'); return; }
+  _cbt = { questions, current: 0, answers: new Array(questions.length).fill(null),
+           mode, timeLimit: timeSecs, timerHandle: null, timeLeft: timeSecs, sourceName, sourceId };
 
-  _cbt = {
-    questions,
-    current:     0,
-    answers:     new Array(questions.length).fill(null),
-    mode,
-    timeLimit:   timeSecs,
-    timerHandle: null,
-    timeLeft:    timeSecs,
-    sourceName,
-    sourceId,
-  };
+  // Store chapters on modal for retry
+  const modal = document.getElementById('cbt-modal');
+  if (modal) modal._origChapters = chapters;
 
   renderCBTQuestion();
   document.getElementById('cbt-modal').classList.add('active');
-
   if (mode === 'test' && timeSecs > 0) startTimer();
 }
 
 function renderCBTQuestion() {
   const body = document.getElementById('cbt-body');
   if (!body) return;
-
   const { questions, current, mode, timeLeft, timeLimit } = _cbt;
   const q     = questions[current];
   const total = questions.length;
   const pct   = Math.round((current / total) * 100);
-
-  // Timer display
-  const timerHtml = (mode === 'test' && timeLimit > 0)
-    ? `<div class="cbt-timer${timeLeft < 60 ? ' danger' : ''}" id="cbt-timer-display">
-         ⏱ ${formatTime(timeLeft)}
-       </div>`
-    : '';
-
-  const keys = ['A', 'B', 'C', 'D', 'E'];
-
-  let questionHtml = '';
+  const keys  = ['A','B','C','D','E'];
   const existingAnswer = _cbt.answers[current];
 
-  if (q.type === 'fillin') {
+  const timerHtml = (mode === 'test' && timeLimit > 0)
+    ? `<div class="cbt-timer${timeLeft < 60 ? ' danger':''}" id="cbt-timer-display">⏱ ${formatTime(timeLeft)}</div>` : '';
+
+  // Normalise question fields (supports both old format and new)
+  const qText    = q.q    || q.text    || '';
+  const qOptions = q.options || [];
+  const qAnswer  = q.answer !== undefined ? q.answer : q.correct;
+  const qExpl    = q.explanation || '';
+  const qType    = q.type || (qOptions.length === 2 && ['True','False'].includes(qOptions[0]) ? 'truefalse' : 'mcq');
+
+  let questionHtml = '';
+  if (qType === 'fillin') {
     questionHtml = `
       <input type="text" class="cbt-fillin-input" id="fillin-input"
         placeholder="Type your answer…"
         value="${existingAnswer && existingAnswer.text ? existingAnswer.text : ''}"
-        onkeydown="if(event.key==='Enter')submitAnswer()">`;
+        onkeydown="if(event.key==='Enter')submitFillin()">`;
   } else {
-    // MCQ or True/False
-    const opts = q.type === 'truefalse' ? ['True', 'False'] : (q.options || []);
+    const opts = qType === 'truefalse' ? ['True','False'] : qOptions;
     questionHtml = `<div class="cbt-options">` +
       opts.map((opt, i) => {
         let cls = 'cbt-option';
         if (existingAnswer !== null) {
           if (mode === 'practice') {
-            if (i === existingAnswer.selected) {
-              cls += existingAnswer.correct ? ' correct' : ' wrong';
-            }
-            if (!existingAnswer.correct && String(i) === String(existingAnswer.correctIdx)) {
-              cls += ' reveal-correct';
-            }
+            if (i === existingAnswer.selected) cls += existingAnswer.correct ? ' correct' : ' wrong';
+            if (!existingAnswer.correct && i === existingAnswer.correctIdx) cls += ' reveal-correct';
           } else {
             if (i === existingAnswer.selected) cls += ' selected';
           }
@@ -895,22 +736,22 @@ function renderCBTQuestion() {
           <span class="cbt-option-key">${keys[i] || i}</span>
           <span>${opt}</span>
         </div>`;
-      }).join('') +
-    `</div>`;
+      }).join('') + `</div>`;
   }
 
-  // Feedback box (practice mode only, shown after answering)
   let feedbackHtml = '';
   if (mode === 'practice' && existingAnswer !== null) {
-    const isCorrect = existingAnswer.correct;
     feedbackHtml = `
-      <div class="cbt-feedback visible ${isCorrect ? 'correct-fb' : 'wrong-fb'}">
-        ${isCorrect ? '✓ Correct!' : `✗ Incorrect. Correct answer: <strong>${existingAnswer.correctAnswer}</strong>`}
-        ${q.explanation ? `<br><em>${q.explanation}</em>` : ''}
+      <div class="cbt-feedback visible ${existingAnswer.correct ? 'correct-fb':'wrong-fb'}">
+        ${existingAnswer.correct
+          ? '✓ Correct!'
+          : `✗ Incorrect. Correct answer: <strong>${existingAnswer.correctAnswer}</strong>`}
+        ${qExpl ? `<br><em>${qExpl}</em>` : ''}
       </div>`;
   }
 
   const nextLabel = current < total - 1 ? 'Next →' : (mode === 'test' ? 'Submit Test' : 'Finish');
+  const canNext   = existingAnswer !== null || qType === 'fillin';
 
   body.innerHTML = `
     <div class="modal-body" style="padding-top:.8rem">
@@ -922,111 +763,69 @@ function renderCBTQuestion() {
         ${timerHtml}
         <div class="cbt-chapter-tag">${q._chapterTitle || ''}</div>
       </div>
-      <div class="cbt-question-text">${q.q}</div>
+      <div class="cbt-question-text">${qText}</div>
       ${questionHtml}
       ${feedbackHtml}
       <div class="cbt-nav-row">
         ${current > 0 && mode === 'practice'
           ? `<button class="btn-action btn-read" onclick="prevQuestion()">← Prev</button>` : ''}
-        <button class="btn-cbt-next" id="cbt-next-btn"
-          onclick="nextOrSubmit()"
-          ${existingAnswer === null && q.type !== 'fillin' && mode === 'test' ? 'disabled' : ''}>
-          ${nextLabel}
-        </button>
+        <button class="btn-cbt-next" id="cbt-next-btn" onclick="nextOrSubmit()"
+          ${!canNext && mode === 'test' ? 'disabled' : ''}>${nextLabel}</button>
       </div>
-    </div>
-  `;
+    </div>`;
 }
 
 window.selectOption = function(idx) {
-  const { questions, current, mode, answers } = _cbt;
-  if (mode !== 'practice' && answers[current] !== null) return; // test: no re-select after answer?
-  // Allow selection even without submit in test mode (deselect/reselect)
-  const q = questions[current];
-  const opts = q.type === 'truefalse' ? ['True', 'False'] : (q.options || []);
-  const correctAnswer = q.answer;
+  const { questions, current, mode } = _cbt;
+  if (mode !== 'practice' && _cbt.answers[current] !== null) return;
+  const q       = questions[current];
+  const qAnswer = q.answer !== undefined ? q.answer : q.correct;
+  const opts    = q.type === 'truefalse' ? ['True','False'] : (q.options || []);
 
   let correctIdx = -1;
-  if (q.type === 'truefalse') {
-    correctIdx = correctAnswer.toString().toLowerCase() === 'true' ? 0 : 1;
+  if (typeof qAnswer === 'number') {
+    correctIdx = qAnswer;
   } else {
-    // answer might be index (number) or text
-    if (typeof correctAnswer === 'number') {
-      correctIdx = correctAnswer;
-    } else {
-      correctIdx = opts.findIndex(o =>
-        o.trim().toLowerCase() === String(correctAnswer).trim().toLowerCase()
-      );
-      if (correctIdx === -1 && String(correctAnswer).length === 1) {
-        correctIdx = 'ABCDE'.indexOf(String(correctAnswer).toUpperCase());
-      }
-    }
+    correctIdx = opts.findIndex(o => o.trim().toLowerCase() === String(qAnswer).trim().toLowerCase());
+    if (correctIdx === -1 && String(qAnswer).length === 1)
+      correctIdx = 'ABCDE'.indexOf(String(qAnswer).toUpperCase());
   }
 
-  const isCorrect = idx === correctIdx;
-
-  if (mode === 'practice') {
-    _cbt.answers[current] = {
-      selected:      idx,
-      correct:       isCorrect,
-      correctIdx:    correctIdx,
-      correctAnswer: opts[correctIdx] || correctAnswer,
-    };
-    renderCBTQuestion();
-  } else {
-    // test mode: highlight selected but don't lock until submit
-    _cbt.answers[current] = {
-      selected:      idx,
-      correct:       isCorrect,
-      correctIdx:    correctIdx,
-      correctAnswer: opts[correctIdx] || correctAnswer,
-    };
-    // just re-render to show selection
-    renderCBTQuestion();
-  }
+  _cbt.answers[current] = {
+    selected:      idx,
+    correct:       idx === correctIdx,
+    correctIdx,
+    correctAnswer: opts[correctIdx] ?? qAnswer,
+  };
+  renderCBTQuestion();
 };
 
-window.submitAnswer = function() {
+window.submitFillin = function() {
   const { questions, current } = _cbt;
-  const q = questions[current];
-  if (q.type !== 'fillin') return;
+  const q   = questions[current];
   const inp = document.getElementById('fillin-input');
   if (!inp) return;
   const userText    = inp.value.trim().toLowerCase();
-  const correctText = String(q.answer).trim().toLowerCase();
-  const isCorrect   = userText === correctText;
+  const correctText = String(q.answer !== undefined ? q.answer : q.correct).trim().toLowerCase();
   _cbt.answers[current] = {
-    text:          inp.value.trim(),
-    correct:       isCorrect,
-    correctAnswer: q.answer,
-    selected:      0,
-    correctIdx:    0,
+    text: inp.value.trim(), correct: userText === correctText,
+    correctAnswer: q.answer !== undefined ? q.answer : q.correct,
+    selected: 0, correctIdx: 0,
   };
   renderCBTQuestion();
 };
 
 window.nextOrSubmit = function() {
-  const { questions, current, mode } = _cbt;
-  // If fill-in and no answer yet, try to submit first
+  const { questions, current } = _cbt;
   const q = questions[current];
-  if (q.type === 'fillin' && _cbt.answers[current] === null) {
-    submitAnswer();
-    return;
-  }
-
-  if (current < questions.length - 1) {
-    _cbt.current++;
-    renderCBTQuestion();
-  } else {
-    endCBT();
-  }
+  const isFillin = (q.type || '') === 'fillin';
+  if (isFillin && _cbt.answers[current] === null) { submitFillin(); return; }
+  if (current < questions.length - 1) { _cbt.current++; renderCBTQuestion(); }
+  else endCBT();
 };
 
 window.prevQuestion = function() {
-  if (_cbt.current > 0) {
-    _cbt.current--;
-    renderCBTQuestion();
-  }
+  if (_cbt.current > 0) { _cbt.current--; renderCBTQuestion(); }
 };
 
 function startTimer() {
@@ -1038,48 +837,63 @@ function startTimer() {
       display.textContent = `⏱ ${formatTime(_cbt.timeLeft)}`;
       display.classList.toggle('danger', _cbt.timeLeft < 60);
     }
-    if (_cbt.timeLeft <= 0) {
-      clearInterval(_cbt.timerHandle);
-      endCBT();
-    }
+    if (_cbt.timeLeft <= 0) { clearInterval(_cbt.timerHandle); endCBT(); }
   }, 1000);
 }
 
 function formatTime(secs) {
-  const m = Math.floor(secs / 60).toString().padStart(2, '0');
-  const s = (secs % 60).toString().padStart(2, '0');
-  return `${m}:${s}`;
+  return `${Math.floor(secs/60).toString().padStart(2,'0')}:${(secs%60).toString().padStart(2,'0')}`;
 }
 
+// ============================================================
+//  END CBT — save to Realtime Database
+// ============================================================
 async function endCBT() {
   clearInterval(_cbt.timerHandle);
-
   const { questions, answers, mode, sourceId, sourceName, timeLimit, timeLeft } = _cbt;
-  const total   = questions.length;
-  const correct = answers.filter(a => a && a.correct).length;
-  const score   = Math.round((correct / total) * 100);
+  const total     = questions.length;
+  const correct   = answers.filter(a => a && a.correct).length;
+  const score     = Math.round((correct / total) * 100);
   const timeTaken = timeLimit > 0 ? timeLimit - timeLeft : 0;
 
-  // Save to cloud if logged in
-  if (_currentUser && _db) {
+  // ── Save to Realtime Database ─────────────────────────────
+  // Path: attempts/{uid}/{auto-push-key}
+  // Each user's attempts are nested under their own UID
+  // so security rules can easily restrict access.
+  if (_currentUser && _db && window._fb) {
     try {
-      await _fb.addDoc(
-        _fb.collection(_db, 'attempts'),
-        {
-          uid:        _currentUser.uid,
-          name:       _userProfile ? _userProfile.name : _currentUser.displayName || 'Student',
-          matric:     _userProfile ? _userProfile.matric : '',
-          level:      _userProfile ? _userProfile.level : '',
-          sourceId,
-          sourceName,
-          mode,
+      const attemptData = {
+        uid:        _currentUser.uid,
+        name:       _userProfile ? _userProfile.name       : 'Guest',
+        matric:     _userProfile ? _userProfile.matric     : '',
+        level:      _userProfile ? _userProfile.level      : '',
+        sourceId,
+        sourceName,
+        mode,
+        score,
+        correct,
+        total,
+        timeTaken,
+        createdAt:  Date.now(),   // milliseconds — RTDB has no serverTimestamp
+      };
+      // push() generates a unique key under attempts/{uid}/
+      await _fb.push(_fb.ref(_db, `attempts/${_currentUser.uid}`), attemptData);
+
+      // Also write a leaderboard entry if it's better than the current best
+      // Path: leaderboard/{sourceId}/{uid}  — one entry per user per source
+      const lbRef = _fb.ref(_db, `leaderboard/${sourceId}/${_currentUser.uid}`);
+      const lbSnap = await _fb.get(lbRef);
+      const existing = lbSnap.exists() ? lbSnap.val() : null;
+      if (!existing || score > existing.score) {
+        await _fb.set(lbRef, {
+          uid:       _currentUser.uid,
+          name:      _userProfile ? _userProfile.name   : 'Guest',
+          matric:    _userProfile ? _userProfile.matric : '',
           score,
-          correct,
-          total,
-          timeTaken,
-          createdAt: _fb.serverTimestamp(),
-        }
-      );
+          sourceName,
+          createdAt: Date.now(),
+        });
+      }
     } catch (e) {
       console.warn('[FUTA] Could not save attempt:', e);
     }
@@ -1089,11 +903,9 @@ async function endCBT() {
 }
 
 function renderCBTResults(correct, total, score, timeTaken, answers, questions, mode) {
-  const grade = getGrade(score);
-  const pct   = score;
-
-  // Animate the ring
-  const ring  = `conic-gradient(var(--gold) ${pct * 3.6}deg, var(--navy-3) 0deg)`;
+  const grade   = getGrade(score);
+  const ring    = `conic-gradient(var(--gold) ${score * 3.6}deg, var(--navy-3) 0deg)`;
+  const timeStr = timeTaken > 0 ? formatTime(timeTaken) : '—';
 
   let reviewHtml = '';
   if (mode === 'test') {
@@ -1101,14 +913,14 @@ function renderCBTResults(correct, total, score, timeTaken, answers, questions, 
       <div class="dash-section-title" style="margin-top:1.2rem">Review answers</div>
       <div class="result-review">
         ${questions.map((q, i) => {
-          const a   = answers[i];
-          const ok  = a && a.correct;
-          const opt = q.type === 'truefalse' ? ['True','False'] : (q.options || []);
-          const yourAns   = a ? (opt[a.selected] || a.text || '(no answer)') : '(no answer)';
-          const correctAns = a ? a.correctAnswer : q.answer;
+          const a          = answers[i];
+          const ok         = a && a.correct;
+          const opts       = q.type === 'truefalse' ? ['True','False'] : (q.options || []);
+          const yourAns    = a ? (opts[a.selected] || a.text || '(no answer)') : '(no answer)';
+          const correctAns = a ? a.correctAnswer : (q.answer !== undefined ? q.answer : q.correct);
           return `
-            <div class="review-item ${ok ? 'ri-correct' : 'ri-wrong'}">
-              <div class="review-q">${i+1}. ${q.q}</div>
+            <div class="review-item ${ok ? 'ri-correct':'ri-wrong'}">
+              <div class="review-q">${i+1}. ${q.q || q.text}</div>
               <div class="review-a">
                 Your answer: <span class="your-a">${yourAns}</span>
                 ${!ok ? `· Correct: <span class="correct-a">${correctAns}</span>` : ''}
@@ -1119,13 +931,11 @@ function renderCBTResults(correct, total, score, timeTaken, answers, questions, 
       </div>`;
   }
 
-  const timeStr = timeTaken > 0 ? formatTime(timeTaken) : '—';
-
   document.getElementById('cbt-body').innerHTML = `
     <div class="modal-body">
       <div class="result-hero">
         <div class="result-ring" style="background:${ring}">
-          <span class="result-percent">${pct}%</span>
+          <span class="result-percent">${score}%</span>
         </div>
         <div class="result-grade">${grade.label}</div>
         <div style="font-size:.82rem;color:var(--text-dim)">${_cbt.sourceName}</div>
@@ -1143,18 +953,22 @@ function renderCBTResults(correct, total, score, timeTaken, answers, questions, 
         <button class="btn-action btn-practice"
           onclick="document.getElementById('cbt-modal').classList.remove('active')">Close</button>
         <button class="btn-action btn-test"
-          onclick="openCBTConfigurator(document.getElementById('cbt-modal')._origChapters||[],_cbt.sourceName,_cbt.sourceId,_cbt.mode)">
-          Retry
-        </button>
+          onclick="retryLastCBT()">Retry</button>
         ${_currentUser ? `<button class="btn-action btn-read"
           onclick="document.getElementById('cbt-modal').classList.remove('active');navigate('dashboard')">
           My Dashboard
         </button>` : ''}
       </div>
       ${reviewHtml}
-    </div>
-  `;
+    </div>`;
 }
+
+window.retryLastCBT = function() {
+  const modal = document.getElementById('cbt-modal');
+  if (!modal || !modal._origChapters) return;
+  modal.classList.remove('active');
+  openCBTConfigurator(modal._origChapters, _cbt.sourceName, _cbt.sourceId, _cbt.mode);
+};
 
 function getGrade(score) {
   if (score >= 90) return { label: 'Distinction — Excellent!' };
@@ -1173,21 +987,15 @@ window.closeCBT = function() {
 //  AUTH MODAL
 // ============================================================
 window.openAuthModal = function(tab) {
-  const modal = document.getElementById('auth-modal');
-  if (!modal) return;
-  modal.classList.add('active');
+  document.getElementById('auth-modal').classList.add('active');
   switchAuthTab(tab || 'login');
 };
-
 window.closeAuthModal = function() {
   document.getElementById('auth-modal').classList.remove('active');
 };
-
 window.switchAuthTab = function(tab) {
-  document.querySelectorAll('.auth-tab').forEach(t => {
-    t.classList.toggle('active', t.dataset.tab === tab);
-  });
-  document.getElementById('auth-login-form').style.display  = tab === 'login'    ? 'block' : 'none';
+  document.querySelectorAll('.auth-tab').forEach(t => t.classList.toggle('active', t.dataset.tab === tab));
+  document.getElementById('auth-login-form').style.display    = tab === 'login'    ? 'block' : 'none';
   document.getElementById('auth-register-form').style.display = tab === 'register' ? 'block' : 'none';
 };
 
@@ -1207,22 +1015,20 @@ window.doRegister = async function() {
     errEl.textContent = 'Password must be at least 6 characters.'; errEl.classList.add('visible'); return;
   }
   errEl.classList.remove('visible');
-
   const btn = document.getElementById('reg-btn');
   btn.disabled = true; btn.textContent = 'Creating account…';
-
   try {
     const { user } = await _fb.createUserWithEmailAndPassword(_auth, email, pass);
-    await _fb.setDoc(_fb.doc(_db, 'users', user.uid), {
+    // Save profile to Realtime Database at users/{uid}
+    await _fb.set(_fb.ref(_db, `users/${user.uid}`), {
       name, matric, email, level,
-      isAdmin: user.uid === window.ADMIN_UID,
-      createdAt: _fb.serverTimestamp(),
+      isAdmin:   user.uid === window.ADMIN_UID,
+      createdAt: Date.now(),
     });
     closeAuthModal();
     showToast(`Welcome, ${name}!`, 'success');
   } catch (e) {
-    errEl.textContent = friendlyAuthError(e.code);
-    errEl.classList.add('visible');
+    errEl.textContent = friendlyAuthError(e.code); errEl.classList.add('visible');
   }
   btn.disabled = false; btn.textContent = 'Create Account';
 };
@@ -1233,17 +1039,14 @@ window.doLogin = async function() {
   const pass  = document.getElementById('login-password').value;
   const errEl = document.getElementById('login-error');
   errEl.classList.remove('visible');
-
   const btn = document.getElementById('login-btn');
   btn.disabled = true; btn.textContent = 'Signing in…';
-
   try {
     await _fb.signInWithEmailAndPassword(_auth, email, pass);
     closeAuthModal();
     showToast('Signed in successfully!', 'success');
   } catch (e) {
-    errEl.textContent = friendlyAuthError(e.code);
-    errEl.classList.add('visible');
+    errEl.textContent = friendlyAuthError(e.code); errEl.classList.add('visible');
   }
   btn.disabled = false; btn.textContent = 'Sign In';
 };
@@ -1258,13 +1061,14 @@ window.doLogout = async function() {
 
 function friendlyAuthError(code) {
   const map = {
-    'auth/email-already-in-use':  'This email is already registered.',
-    'auth/invalid-email':         'Please enter a valid email address.',
-    'auth/weak-password':         'Password too weak. Use at least 6 characters.',
-    'auth/user-not-found':        'No account found with this email.',
-    'auth/wrong-password':        'Incorrect password.',
-    'auth/too-many-requests':     'Too many attempts. Please wait and try again.',
-    'auth/network-request-failed':'Network error. Check your connection.',
+    'auth/email-already-in-use':   'This email is already registered.',
+    'auth/invalid-email':          'Please enter a valid email address.',
+    'auth/weak-password':          'Password too weak. Use at least 6 characters.',
+    'auth/user-not-found':         'No account found with this email.',
+    'auth/wrong-password':         'Incorrect password.',
+    'auth/invalid-credential':     'Incorrect email or password.',
+    'auth/too-many-requests':      'Too many attempts. Please wait and try again.',
+    'auth/network-request-failed': 'Network error. Check your connection.',
   };
   return map[code] || 'Something went wrong. Please try again.';
 }
@@ -1276,7 +1080,7 @@ function renderNavAuth() {
   const area = document.getElementById('nav-auth-area');
   if (!area) return;
   if (_currentUser && _userProfile) {
-    const initials = _userProfile.name.split(' ').map(n => n[0]).join('').slice(0, 2).toUpperCase();
+    const initials  = _userProfile.name.split(' ').map(n => n[0]).join('').slice(0,2).toUpperCase();
     const shortName = _userProfile.name.split(' ')[0];
     area.innerHTML = `
       <div class="nav-user-chip" onclick="toggleUserDropdown()">
@@ -1313,23 +1117,17 @@ window.toggleUserDropdown = function() {
       </button>`;
   }
 };
-
 window.closeUserDropdown = function() {
   const dd = document.getElementById('user-dropdown');
   if (dd) dd.classList.remove('open');
 };
-
 document.addEventListener('click', e => {
   const dd   = document.getElementById('user-dropdown');
   const chip = document.querySelector('.nav-user-chip');
-  if (dd && dd.classList.contains('open') && !dd.contains(e.target) && (!chip || !chip.contains(e.target))) {
+  if (dd && dd.classList.contains('open') && !dd.contains(e.target) && (!chip || !chip.contains(e.target)))
     closeUserDropdown();
-  }
 });
 
-// ============================================================
-//  NAV BIND
-// ============================================================
 function bindNav() {
   const crest = document.querySelector('.nav-crest');
   const logo  = document.querySelector('.nav-logo');
@@ -1339,7 +1137,7 @@ function bindNav() {
 }
 
 // ============================================================
-//  STUDENT DASHBOARD
+//  STUDENT DASHBOARD — reads from RTDB attempts/{uid}
 // ============================================================
 async function renderDashboard() {
   setBreadcrumb(['Home', 'My Dashboard']);
@@ -1355,19 +1153,14 @@ async function renderDashboard() {
     return;
   }
 
-  content.innerHTML = `<div style="display:flex;justify-content:center;padding:3rem">
-    <div class="spinner"></div></div>`;
+  content.innerHTML = `<div style="display:flex;justify-content:center;padding:3rem"><div class="spinner"></div></div>`;
 
   try {
-    const attSnap = await _fb.getDocs(
-      _fb.query(
-        _fb.collection(_db, 'attempts'),
-        _fb.where('uid', '==', _currentUser.uid),
-        _fb.orderBy('createdAt', 'desc'),
-        _fb.limit(50)
-      )
-    );
-    const attempts = attSnap.docs.map(d => ({ id: d.id, ...d.data() }));
+    // Read all attempts for this user
+    const snap     = await _fb.get(_fb.ref(_db, `attempts/${_currentUser.uid}`));
+    const raw      = snap.exists() ? snap.val() : {};
+    // Convert object-of-objects to array, sorted newest first
+    const attempts = Object.values(raw).sort((a, b) => b.createdAt - a.createdAt);
     renderDashboardContent(content, attempts);
   } catch (e) {
     content.innerHTML = `<div class="empty-state"><p>Could not load your data. Check your connection.</p></div>`;
@@ -1385,11 +1178,11 @@ function renderDashboardContent(container, attempts) {
     return;
   }
 
-  const total   = attempts.length;
+  const total    = attempts.length;
   const avgScore = Math.round(attempts.reduce((s, a) => s + a.score, 0) / total);
   const bestScore = Math.max(...attempts.map(a => a.score));
 
-  // Weak topics (avg < 60%)
+  // Weak topics
   const sourceAvg = {};
   attempts.forEach(a => {
     if (!sourceAvg[a.sourceId]) sourceAvg[a.sourceId] = { sum: 0, count: 0, name: a.sourceName };
@@ -1410,35 +1203,27 @@ function renderDashboardContent(container, attempts) {
         <div class="dash-stat-card"><div class="dash-stat-n">${_userProfile ? _userProfile.level : ''}</div><div class="dash-stat-l">Level</div></div>
       </div>
 
-      ${weak.length > 0 ? `
+      ${weak.length ? `
         <div class="dash-section">
           <div class="dash-section-title">Topics to focus on (below 60%)</div>
-          <div>${weak.map(w =>
-            `<span class="weak-topic-tag">${w.name} — ${Math.round(w.sum/w.count)}%</span>`
-          ).join('')}</div>
+          <div>${weak.map(w => `<span class="weak-topic-tag">${w.name} — ${Math.round(w.sum/w.count)}%</span>`).join('')}</div>
         </div>` : ''}
 
       <div class="dash-section">
         <div class="dash-section-title">Recent attempts</div>
         <div style="overflow-x:auto">
           <table class="attempt-table">
-            <thead><tr>
-              <th>Source</th><th>Mode</th><th>Score</th>
-              <th>Date</th><th>Time</th>
-            </tr></thead>
+            <thead><tr><th>Source</th><th>Mode</th><th>Score</th><th>Date</th><th>Time</th></tr></thead>
             <tbody>
               ${attempts.slice(0, 15).map(a => {
-                const scoreClass = a.score >= 70 ? 'high' : a.score >= 50 ? 'mid' : 'low';
-                const date = a.createdAt && a.createdAt.toDate
-                  ? a.createdAt.toDate().toLocaleDateString('en-GB', { day:'2-digit', month:'short' })
-                  : '—';
-                const time = a.timeTaken > 0 ? formatTime(a.timeTaken) : '—';
+                const sc   = a.score >= 70 ? 'high' : a.score >= 50 ? 'mid' : 'low';
+                const date = a.createdAt ? new Date(a.createdAt).toLocaleDateString('en-GB',{day:'2-digit',month:'short'}) : '—';
                 return `<tr>
                   <td style="color:var(--text-main)">${a.sourceName}</td>
                   <td>${a.mode}</td>
-                  <td><span class="score-pill ${scoreClass}">${a.score}%</span></td>
+                  <td><span class="score-pill ${sc}">${a.score}%</span></td>
                   <td>${date}</td>
-                  <td>${time}</td>
+                  <td>${a.timeTaken > 0 ? formatTime(a.timeTaken) : '—'}</td>
                 </tr>`;
               }).join('')}
             </tbody>
@@ -1447,31 +1232,33 @@ function renderDashboardContent(container, attempts) {
       </div>
 
       <div class="dash-section">
-        <div class="dash-section-title">Leaderboard — Top 5 (all my courses)</div>
+        <div class="dash-section-title">Leaderboard — Top 5</div>
         <div id="leaderboard-container"><div class="spinner"></div></div>
       </div>
-    </div>
-  `;
+    </div>`;
 
-  loadLeaderboard(attempts.map(a => a.sourceId).filter((v, i, arr) => arr.indexOf(v) === i));
+  // Unique sourceIds from this user's attempts (up to 5 for the leaderboard)
+  const sourceIds = [...new Set(attempts.map(a => a.sourceId))].slice(0, 5);
+  loadLeaderboard(sourceIds);
 }
 
+// ============================================================
+//  LEADERBOARD — reads from RTDB leaderboard/{sourceId}
+// ============================================================
 async function loadLeaderboard(sourceIds) {
   const container = document.getElementById('leaderboard-container');
   if (!container || !_db) return;
   try {
-    // Get top 5 per sourceId for the user's attempted sources
     const results = {};
-    for (const sid of sourceIds.slice(0, 5)) {
-      const snap = await _fb.getDocs(
-        _fb.query(
-          _fb.collection(_db, 'attempts'),
-          _fb.where('sourceId', '==', sid),
-          _fb.orderBy('score', 'desc'),
-          _fb.limit(5)
-        )
-      );
-      results[sid] = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+    for (const sid of sourceIds) {
+      const snap = await _fb.get(_fb.ref(_db, `leaderboard/${sid}`));
+      if (snap.exists()) {
+        // leaderboard/{sourceId}/{uid} — get all entries, sort by score desc, take top 5
+        const entries = Object.values(snap.val())
+          .sort((a, b) => b.score - a.score)
+          .slice(0, 5);
+        results[sid] = entries;
+      }
     }
     renderLeaderboard(container, results);
   } catch (e) {
@@ -1480,37 +1267,38 @@ async function loadLeaderboard(sourceIds) {
 }
 
 function renderLeaderboard(container, results) {
-  const rankColors = ['gold-r', 'silver-r', 'bronze-r', '', ''];
+  const rankColors = ['gold-r','silver-r','bronze-r','',''];
+  const rankIcons  = ['🥇','🥈','🥉','4','5'];
   let html = '';
   for (const [sid, entries] of Object.entries(results)) {
     if (!entries.length) continue;
-    const title = entries[0].sourceName;
-    html += `<div style="margin-bottom:1.5rem">
-      <div style="font-size:.75rem;color:var(--text-dim);margin-bottom:.5rem">${title}</div>
-      <div class="leaderboard-list">
-        ${entries.map((e, i) => {
-          const initials = e.name ? e.name.split(' ').map(n=>n[0]).join('').slice(0,2).toUpperCase() : '??';
-          const isYou    = _currentUser && e.uid === _currentUser.uid;
-          const date     = e.createdAt && e.createdAt.toDate
-            ? e.createdAt.toDate().toLocaleDateString('en-GB', {day:'2-digit',month:'short'}) : '';
-          return `<div class="lb-row">
-            <div class="lb-rank ${rankColors[i]}">${['🥇','🥈','🥉','4','5'][i]}</div>
-            <div style="display:flex;align-items:center;gap:.5rem;flex:1">
-              <div class="nav-avatar" style="width:28px;height:28px;font-size:.6rem">${initials}</div>
-              <div class="lb-name">${e.name} ${isYou ? '<span class="lb-you-tag">You</span>' : ''}</div>
-            </div>
-            <div class="lb-date">${date}</div>
-            <div class="lb-score">${e.score}%</div>
-          </div>`;
-        }).join('')}
-      </div>
-    </div>`;
+    html += `
+      <div style="margin-bottom:1.5rem">
+        <div style="font-size:.75rem;color:var(--text-dim);margin-bottom:.5rem">${entries[0].sourceName}</div>
+        <div class="leaderboard-list">
+          ${entries.map((e, i) => {
+            const initials = e.name ? e.name.split(' ').map(n=>n[0]).join('').slice(0,2).toUpperCase() : '??';
+            const isYou    = _currentUser && e.uid === _currentUser.uid;
+            const date     = e.createdAt ? new Date(e.createdAt).toLocaleDateString('en-GB',{day:'2-digit',month:'short'}) : '';
+            return `
+              <div class="lb-row">
+                <div class="lb-rank ${rankColors[i]}">${rankIcons[i]}</div>
+                <div style="display:flex;align-items:center;gap:.5rem;flex:1">
+                  <div class="nav-avatar" style="width:28px;height:28px;font-size:.6rem">${initials}</div>
+                  <div class="lb-name">${e.name} ${isYou ? '<span class="lb-you-tag">You</span>' : ''}</div>
+                </div>
+                <div class="lb-date">${date}</div>
+                <div class="lb-score">${e.score}%</div>
+              </div>`;
+          }).join('')}
+        </div>
+      </div>`;
   }
   container.innerHTML = html || `<p style="font-size:.8rem;color:var(--text-dim)">No leaderboard data yet.</p>`;
 }
 
 // ============================================================
-//  ADMIN PANEL
+//  ADMIN PANEL — reads from RTDB users/ and all attempts/
 // ============================================================
 async function renderAdmin() {
   setBreadcrumb(['Home', 'Admin Panel']);
@@ -1518,42 +1306,49 @@ async function renderAdmin() {
   if (!content) return;
 
   if (!_currentUser || _currentUser.uid !== window.ADMIN_UID) {
-    content.innerHTML = `<div class="empty-state"><div class="icon">🛡</div>
-      <p>Access denied. Admin only.</p></div>`;
+    content.innerHTML = `<div class="empty-state"><div class="icon">🛡</div><p>Access denied. Admin only.</p></div>`;
     return;
   }
 
-  content.innerHTML = `<div style="display:flex;justify-content:center;padding:3rem">
-    <div class="spinner"></div></div>`;
+  content.innerHTML = `<div style="display:flex;justify-content:center;padding:3rem"><div class="spinner"></div></div>`;
 
   try {
     const [usersSnap, attSnap] = await Promise.all([
-      _fb.getDocs(_fb.collection(_db, 'users')),
-      _fb.getDocs(_fb.query(
-        _fb.collection(_db, 'attempts'),
-        _fb.orderBy('createdAt', 'desc'),
-        _fb.limit(200)
-      ))
+      _fb.get(_fb.ref(_db, 'users')),
+      _fb.get(_fb.ref(_db, 'attempts')),
     ]);
-    const users    = usersSnap.docs.map(d => ({ id: d.id, ...d.data() }));
-    const attempts = attSnap.docs.map(d => ({ id: d.id, ...d.data() }));
-    renderAdminContent(content, users, attempts);
+
+    const users = usersSnap.exists() ? Object.entries(usersSnap.val()).map(([uid, v]) => ({ uid, ...v })) : [];
+
+    // attempts is nested: { uid: { pushKey: attemptObj } }
+    const attempts = [];
+    if (attSnap.exists()) {
+      const raw = attSnap.val();
+      for (const uid of Object.keys(raw)) {
+        for (const attempt of Object.values(raw[uid])) {
+          attempts.push(attempt);
+        }
+      }
+      attempts.sort((a, b) => b.createdAt - a.createdAt);
+    }
+
+    renderAdminContent(content, users, attempts.slice(0, 300));
   } catch (e) {
-    content.innerHTML = `<div class="empty-state"><p>Could not load admin data.</p></div>`;
+    content.innerHTML = `<div class="empty-state"><p>Could not load admin data. Check your database rules.</p></div>`;
     console.error(e);
   }
 }
 
 function renderAdminContent(container, users, attempts) {
+  const avgScore = attempts.length
+    ? Math.round(attempts.reduce((s, a) => s + a.score, 0) / attempts.length) : 0;
+
   container.innerHTML = `
     <div style="padding-top:2rem">
       <div class="dash-stats-row">
         <div class="dash-stat-card"><div class="dash-stat-n">${users.length}</div><div class="dash-stat-l">Students</div></div>
         <div class="dash-stat-card"><div class="dash-stat-n">${attempts.length}</div><div class="dash-stat-l">Total Attempts</div></div>
-        <div class="dash-stat-card">
-          <div class="dash-stat-n">${attempts.length > 0 ? Math.round(attempts.reduce((s,a)=>s+a.score,0)/attempts.length) : 0}%</div>
-          <div class="dash-stat-l">Overall Avg</div>
-        </div>
+        <div class="dash-stat-card"><div class="dash-stat-n">${avgScore}%</div><div class="dash-stat-l">Overall Avg</div></div>
         <div class="dash-stat-card"><div class="dash-stat-n">${new Set(attempts.map(a=>a.sourceId)).size}</div><div class="dash-stat-l">Topics Tested</div></div>
       </div>
 
@@ -1573,14 +1368,12 @@ function renderAdminContent(container, users, attempts) {
             </tr></thead>
             <tbody id="admin-tbody">
               ${attempts.map(a => {
-                const sc  = a.score >= 70 ? 'high' : a.score >= 50 ? 'mid' : 'low';
-                const date = a.createdAt && a.createdAt.toDate
-                  ? a.createdAt.toDate().toLocaleDateString('en-GB', {day:'2-digit',month:'short',year:'2-digit'})
-                  : '—';
+                const sc   = a.score >= 70 ? 'high' : a.score >= 50 ? 'mid' : 'low';
+                const date = a.createdAt ? new Date(a.createdAt).toLocaleDateString('en-GB',{day:'2-digit',month:'short',year:'2-digit'}) : '—';
                 return `<tr>
-                  <td style="color:var(--text-main)">${a.name || '—'}</td>
-                  <td><code style="font-size:.75rem">${a.matric || '—'}</code></td>
-                  <td>${a.level || '—'}</td>
+                  <td style="color:var(--text-main)">${a.name||'—'}</td>
+                  <td><code style="font-size:.75rem">${a.matric||'—'}</code></td>
+                  <td>${a.level||'—'}</td>
                   <td>${a.sourceName}</td>
                   <td>${a.mode}</td>
                   <td><span class="score-pill ${sc}">${a.score}%</span></td>
@@ -1608,18 +1401,14 @@ function renderAdminContent(container, users, attempts) {
           </table>
         </div>
       </div>
-    </div>
-  `;
+    </div>`;
 
-  // Store attempts for CSV export
   container._attempts = attempts;
-  container._users    = users;
 }
 
 window.filterAdminTable = function() {
-  const q    = document.getElementById('admin-search').value.toLowerCase();
-  const rows = document.querySelectorAll('#admin-tbody tr');
-  rows.forEach(row => {
+  const q = document.getElementById('admin-search').value.toLowerCase();
+  document.querySelectorAll('#admin-tbody tr').forEach(row => {
     row.style.display = row.textContent.toLowerCase().includes(q) ? '' : 'none';
   });
 };
@@ -1629,15 +1418,14 @@ window.exportAdminCSV = function() {
   if (!container || !container._attempts) return;
   const rows = [['Name','Matric','Level','Source','Mode','Score','Date']];
   container._attempts.forEach(a => {
-    const date = a.createdAt && a.createdAt.toDate
-      ? a.createdAt.toDate().toLocaleDateString('en-GB') : '';
+    const date = a.createdAt ? new Date(a.createdAt).toLocaleDateString('en-GB') : '';
     rows.push([a.name||'',a.matric||'',a.level||'',a.sourceName,a.mode,a.score+'%',date]);
   });
   const csv = rows.map(r => r.map(c => `"${c}"`).join(',')).join('\n');
-  const a   = document.createElement('a');
-  a.href    = 'data:text/csv;charset=utf-8,' + encodeURIComponent(csv);
-  a.download = 'futa_attempts_' + new Date().toISOString().slice(0,10) + '.csv';
-  a.click();
+  const link = document.createElement('a');
+  link.href     = 'data:text/csv;charset=utf-8,' + encodeURIComponent(csv);
+  link.download = 'futa_attempts_' + new Date().toISOString().slice(0,10) + '.csv';
+  link.click();
 };
 
 // ============================================================
