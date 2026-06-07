@@ -340,7 +340,7 @@ PORTAL_INJECT("ENT 301", [
       { type: "fitb", text: "Robert Cooper is associated with the ___ process, a structured approach to managing new product development.", answer: "Stage-Gate", explanation: "Robert Cooper developed Stage-Gate in the 1980s–90s — it remains the most widely used formal framework for new product development in industry." },
       { type: "fitb", text: "In the Stage-Gate process, the decision options at each gate are: Go, ___, Hold, or Recycle.", answer: "Kill", explanation: "At each gate, management can Go (proceed), Kill (terminate the project), Hold (pause temporarily), or Recycle (revise and resubmit)." }
     ]
-  }
+  },
 
   /* ============================================================
      CHAPTER 6 — Family Business & Succession Planning
@@ -675,7 +675,7 @@ PORTAL_INJECT("ENT 301", [
       { type: "fitb", text: "A shorter, visual investor presentation of 10–20 slides derived from the business plan is called a ___ deck.", answer: "pitch", explanation: "A pitch deck distils the business plan into a visual, narrative-driven presentation for investor meetings — typically following frameworks like Guy Kawasaki's 10-slide format." },
       { type: "fitb", text: "___ feasibility examines whether there is sufficient customer demand for the proposed product or service.", answer: "Market", explanation: "Market feasibility analyses demand size, target customer behaviour, competitive landscape, and pricing to determine whether a viable commercial market exists." }
     ]
-  }
+  },
 
 /* ============================================================
      CHAPTER 11 — Theories of Growth
