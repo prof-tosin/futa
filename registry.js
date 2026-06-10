@@ -198,10 +198,10 @@ function _normalise(arg1, arg2) {
 
     const titleMap = {
       'PHY 102': 'Basic Physics II',
-      'PHY 108': 'Basic Physics I',
-      'MTS 101': 'Elementary Mathematics I',
-      'MTS 102': 'Elementary Mathematics II',
-      'MTS 104': 'Elementary Mathematics IV',
+      'PHY 108': 'Experimental Physics II',
+      'MTS 101': 'Introductory Mathematics I',
+      'MTS 102': 'Introductory Mathematics II',
+      'MTS 104': 'Applied Mathematics',
       'CSC 102': 'Introduction to Computer Science',
       'EEE 102': 'Basic Electrical Engineering',
       'CHE 102': 'General Chemistry II',
@@ -209,7 +209,7 @@ function _normalise(arg1, arg2) {
       'BIO 102': 'General Biology II',
       'BIO 104': 'General Biology IV',
       'GNS 102': 'Use of English II',
-      'GNS 106': 'Communication in English II',
+      'GNS 106': 'Logic and Philosophy',
       'MEE 102': 'Engineering Drawing II',
       'ENT 301': 'Entrepreneurship',
     };
