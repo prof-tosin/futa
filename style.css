@@ -52,12 +52,6 @@ body {
   overflow-x: hidden;
 }
 
-.nav-logo-img {
-  height: 38px;
-  width: auto;
-  object-fit: contain;
-}
-
 
 /* ── TYPOGRAPHY ───────────────────────────────────────────── */
 h1, h2, h3, h4 {
@@ -110,6 +104,12 @@ nav {
   color: var(--navy);
   cursor: pointer;
   flex-shrink: 0;
+}
+
+.nav-logo-img {
+  height: 38px;
+  width: auto;
+  object-fit: contain;
 }
 
 .nav-logo {
