@@ -1972,4 +1972,4 @@ PORTAL_INJECT("BIO 102", [
       }
     ]
   }
-]; // end PORTAL_INJECT for BIO 102
+]); // end PORTAL_INJECT for BIO 102
