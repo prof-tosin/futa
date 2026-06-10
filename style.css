@@ -52,6 +52,13 @@ body {
   overflow-x: hidden;
 }
 
+.nav-logo-img {
+  height: 38px;
+  width: auto;
+  object-fit: contain;
+}
+
+
 /* ── TYPOGRAPHY ───────────────────────────────────────────── */
 h1, h2, h3, h4 {
   font-family: 'Playfair Display', serif;
