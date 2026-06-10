@@ -2178,7 +2178,7 @@ window.sendFeedback = function() {
   if (!msg) { showToast('Please enter your feedback.', 'error'); return; }
   const subject = encodeURIComponent('FUTA Online Class — Feedback');
   const body    = encodeURIComponent(`From: ${name}\n\n${msg}`);
-  window.open(`mailto:oluwatosinodejinmi60@gmail.com?subject=${subject}&body=${body}`, '_blank');
+  window.open(`mailto:futaonlineclass@gmail.com?subject=${subject}&body=${body}`, '_blank');
   document.getElementById('feedback-text').value = '';
   closeFeedbackModal();
   showToast('Thank you for your feedback!', 'success');
