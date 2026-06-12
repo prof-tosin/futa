@@ -36,11 +36,9 @@ let _combineMode     = false;
 // ── SOCIAL STATE ─────────────────────────────────────────────
 let _chatUnsubscribe  = null;
 
-// ── AUTH READY STATE ──────────────────────────────────────────
-// Resolves once onAuthStateChanged fires for the first time.
-// Used to avoid race conditions when navigating to auth-gated pages.
-let _authReadyResolve = null;
-const _authReady = new Promise(res => { _authReadyResolve = res; });
+// ── AUTH RESOLVED FLAG ────────────────────────────────────────
+// Set to true once onAuthStateChanged fires for the first time.
+let _authResolved = false;
 
 // ============================================================
 //  FIREBASE INIT  (Auth + Realtime Database + Storage)
@@ -101,19 +99,17 @@ async function initFirebase() {
       } else {
         _userProfile = null;
       }
-      // Resolve the auth-ready promise (only fires the first time)
-      if (_authReadyResolve) { _authReadyResolve(); _authReadyResolve = null; return; }
+
+      _authResolved = true;
       renderNavAuth();
-      // If an auth-gated page is currently showing only the spinner (not yet rendered),
-      // re-render it now that auth state is confirmed.
-      const gated = ['community','dashboard','leaderboard','profile','admin'];
-      for (const pg of gated) {
-        const el = document.getElementById('page-' + pg);
-        if (el && el.classList.contains('active')) {
-          const content = el.querySelector('[id$="-content"]');
-          // Only re-render if the page shows a spinner (not already rendered)
-          if (content && content.querySelector('.spinner')) { navigate(pg); }
-          break;
+
+      // If community page is active and not yet rendered, render it now
+      const communityPage = document.getElementById('page-community');
+      if (communityPage && communityPage.classList.contains('active')) {
+        const content = document.getElementById('community-content');
+        // Only re-render if it's showing a spinner or is empty
+        if (content && (!content.querySelector('.community-tabs'))) {
+          renderCommunity();
         }
       }
     });
@@ -1697,22 +1693,19 @@ async function renderLeaderboardPage() {
 // ============================================================
 //  COMMUNITY PAGE — Chat + Social Feed
 // ============================================================
-let _renderCommunityActive = false;
-
-async function renderCommunity() {
-  // Prevent double-render from auth state re-trigger
-  if (_renderCommunityActive) return;
-  _renderCommunityActive = true;
-
+function renderCommunity() {
   setBreadcrumb(['Home', 'Community']);
   const content = document.getElementById('community-content');
-  if (!content) { _renderCommunityActive = false; return; }
+  if (!content) return;
 
-  // Show spinner while waiting for auth state
-  content.innerHTML = `<div style="display:flex;justify-content:center;padding:3rem"><div class="spinner"></div></div>`;
-  await _authReady;
-  _renderCommunityActive = false;
+  // If auth hasn't resolved yet, show spinner and wait for
+  // onAuthStateChanged to call us again once it's ready
+  if (!_authResolved) {
+    content.innerHTML = `<div style="display:flex;justify-content:center;padding:3rem"><div class="spinner"></div></div>`;
+    return;
+  }
 
+  // Auth resolved — check login
   if (!_currentUser) {
     content.innerHTML = `
       <div class="empty-state" style="padding-top:3rem">
@@ -1722,16 +1715,21 @@ async function renderCommunity() {
     return;
   }
 
+  // Already fully rendered — don't rebuild the DOM, just make sure chat is loaded
+  if (content.querySelector('.community-tabs')) {
+    if (!_chatUnsubscribe) loadChat();
+    return;
+  }
+
+  // Build the community UI
   content.innerHTML = `
     <div class="community-layout" style="padding-top:1.5rem">
-      <!-- Tabs -->
       <div class="community-tabs">
         <button class="community-tab active" data-tab="chat" onclick="switchCommunityTab('chat')">💬 Group Chat</button>
         <button class="community-tab" data-tab="feed" onclick="switchCommunityTab('feed')">📢 Activity Feed</button>
         <button class="community-tab" data-tab="students" onclick="switchCommunityTab('students')">👥 Students</button>
       </div>
 
-      <!-- Chat Tab -->
       <div id="community-chat" class="community-panel">
         <div class="chat-messages" id="chat-messages">
           <div style="display:flex;justify-content:center;padding:2rem"><div class="spinner"></div></div>
@@ -1745,14 +1743,12 @@ async function renderCommunity() {
         </div>
       </div>
 
-      <!-- Feed Tab -->
       <div id="community-feed" class="community-panel" style="display:none">
         <div id="activity-feed-content">
           <div style="display:flex;justify-content:center;padding:2rem"><div class="spinner"></div></div>
         </div>
       </div>
 
-      <!-- Students Tab -->
       <div id="community-students" class="community-panel" style="display:none">
         <div id="students-list-content">
           <div style="display:flex;justify-content:center;padding:2rem"><div class="spinner"></div></div>
@@ -1760,7 +1756,6 @@ async function renderCommunity() {
       </div>
     </div>`;
 
-  // Load chat immediately
   loadChat();
 }
 
