@@ -1336,6 +1336,7 @@ window.doLogout = async function() {
   if (!_auth) return;
   // Clean up all live listeners before signing out
   if (_chatUnsubscribe) { _chatUnsubscribe(); _chatUnsubscribe = null; }
+  _stopChatPolling();
   if (_studentsUnsubscribe) { _studentsUnsubscribe(); _studentsUnsubscribe = null; }
   // Reset auth flag so community page re-renders fresh on next login
   _authResolved = false;
@@ -1721,6 +1722,7 @@ function renderCommunity() {
 
   // Always tear down any old listener before rebuilding DOM
   if (_chatUnsubscribe) { _chatUnsubscribe(); _chatUnsubscribe = null; }
+  _stopChatPolling();
   if (_studentsUnsubscribe) { _studentsUnsubscribe(); _studentsUnsubscribe = null; }
 
   // Build the community UI fresh
@@ -1773,6 +1775,66 @@ window.switchCommunityTab = function(tab) {
 };
 
 // ── Chat ─────────────────────────────────────────────────────
+// ── Chat polling interval handle ──────────────────────────────
+let _chatPollHandle = null;
+
+function _renderChatMessages(snap) {
+  const el = document.getElementById('chat-messages');
+  if (!el) return;
+
+  if (!snap.exists()) {
+    el.innerHTML = '<p style="text-align:center;color:var(--text-dim);padding:2rem;font-size:.85rem">No messages yet. Say hello! 👋</p>';
+    return;
+  }
+
+  const msgs = [];
+  snap.forEach(child => msgs.push({ key: child.key, ...child.val() }));
+  msgs.sort((a, b) => (a.createdAt || 0) - (b.createdAt || 0));
+
+  const atBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 80;
+
+  el.innerHTML = msgs.map(msg => {
+    const isMe = msg.uid === _currentUser.uid;
+    const time = msg.createdAt
+      ? new Date(msg.createdAt).toLocaleTimeString('en-GB', {hour:'2-digit', minute:'2-digit'})
+      : '';
+    return '<div class="chat-msg ' + (isMe ? 'chat-msg-me' : '') + '">' +
+      '<div class="chat-msg-inner">' +
+      (!isMe ? '<div class="chat-msg-avatar">' + avatarHtml(msg.name || '?', msg.photoURL || '', 30) + '</div>' : '') +
+      '<div class="chat-msg-body">' +
+      (!isMe ? '<div class="chat-msg-sender">' + escapeHtml(msg.name || 'Student') + '</div>' : '') +
+      '<div class="chat-msg-text">' + escapeHtml(msg.text || '') + '</div>' +
+      '<div class="chat-msg-time">' + time + '</div>' +
+      '</div></div></div>';
+  }).join('');
+
+  if (atBottom) el.scrollTop = el.scrollHeight;
+}
+
+async function _fetchChatOnce() {
+  if (!_db || !window._fb || !_currentUser) return;
+  if (!document.getElementById('chat-messages')) {
+    _stopChatPolling();
+    return;
+  }
+  try {
+    const chatRef = _fb.ref(_db, 'community/chat');
+    const chatQ   = _fb.query(chatRef, _fb.limitToLast(60));
+    const snap    = await _fb.get(chatQ);
+    _renderChatMessages(snap);
+  } catch (err) {
+    console.error('[FUTA] Chat fetch error:', err.code || err.message);
+    const el = document.getElementById('chat-messages');
+    if (el && el.querySelector && el.querySelector('.spinner')) {
+      el.innerHTML = '<p style="text-align:center;color:var(--text-dim);padding:2rem;font-size:.85rem">Could not load chat (' + (err.code || 'network error') + '). Retrying…</p>';
+    }
+  }
+}
+
+function _stopChatPolling() {
+  if (_chatPollHandle) { clearInterval(_chatPollHandle); _chatPollHandle = null; }
+}
+
 function loadChat() {
   if (!_db || !window._fb || !_currentUser) {
     console.error('[FUTA] loadChat: missing db/fb/user', !!_db, !!window._fb, !!_currentUser);
@@ -1784,51 +1846,43 @@ function loadChat() {
     return;
   }
 
+  // Tear down any previous listener / poll
   if (_chatUnsubscribe) { _chatUnsubscribe(); _chatUnsubscribe = null; }
+  _stopChatPolling();
 
+  // Try onValue (WebSocket) first; if it errors or times out, fall back to HTTPS polling
   const chatRef = _fb.ref(_db, 'community/chat');
   const chatQ   = _fb.query(chatRef, _fb.limitToLast(60));
+
+  let wsWorking  = false;
+  let wsTimedOut = false;
+
+  // If WebSocket doesn't deliver within 5 s, switch to polling
+  const wsTimeout = setTimeout(() => {
+    if (!wsWorking) {
+      wsTimedOut = true;
+      console.warn('[FUTA] onValue timed out — switching to HTTPS polling');
+      if (_chatUnsubscribe) { _chatUnsubscribe(); _chatUnsubscribe = null; }
+      _fetchChatOnce();
+      _chatPollHandle = setInterval(_fetchChatOnce, 8000);
+    }
+  }, 5000);
 
   _chatUnsubscribe = _fb.onValue(
     chatQ,
     snap => {
-      const el = document.getElementById('chat-messages');
-      if (!el) return;
-
-      if (!snap.exists()) {
-        el.innerHTML = `<p style="text-align:center;color:var(--text-dim);padding:2rem;font-size:.85rem">No messages yet. Say hello! 👋</p>`;
-        return;
-      }
-
-      const msgs = [];
-      snap.forEach(child => msgs.push({ key: child.key, ...child.val() }));
-      msgs.sort((a, b) => (a.createdAt || 0) - (b.createdAt || 0));
-
-      el.innerHTML = msgs.map(msg => {
-        const isMe = msg.uid === _currentUser.uid;
-        const time = msg.createdAt
-          ? new Date(msg.createdAt).toLocaleTimeString('en-GB', {hour:'2-digit', minute:'2-digit'})
-          : '';
-        return `<div class="chat-msg ${isMe ? 'chat-msg-me' : ''}">
-          <div class="chat-msg-inner">
-            ${!isMe ? `<div class="chat-msg-avatar">${avatarHtml(msg.name || '?', msg.photoURL || '', 30)}</div>` : ''}
-            <div class="chat-msg-body">
-              ${!isMe ? `<div class="chat-msg-sender">${escapeHtml(msg.name || 'Student')}</div>` : ''}
-              <div class="chat-msg-text">${escapeHtml(msg.text || '')}</div>
-              <div class="chat-msg-time">${time}</div>
-            </div>
-          </div>
-        </div>`;
-      }).join('');
-
-      el.scrollTop = el.scrollHeight;
+      if (wsTimedOut) return;
+      wsWorking = true;
+      clearTimeout(wsTimeout);
+      _renderChatMessages(snap);
     },
     err => {
-      console.error('[FUTA] Chat error:', err.code, err.message);
-      const el = document.getElementById('chat-messages');
-      if (el) el.innerHTML = `<p style="text-align:center;color:var(--text-dim);padding:2rem;font-size:.85rem">
-        Chat error: ${err.code}. Please refresh.
-      </p>`;
+      clearTimeout(wsTimeout);
+      wsTimedOut = true;
+      console.warn('[FUTA] onValue error — switching to HTTPS polling:', err.code, err.message);
+      if (_chatUnsubscribe) { _chatUnsubscribe(); _chatUnsubscribe = null; }
+      _fetchChatOnce();
+      _chatPollHandle = setInterval(_fetchChatOnce, 8000);
     }
   );
 }
@@ -1846,6 +1900,11 @@ window.sendChatMessage = async function() {
       text,
       createdAt: Date.now(),
     });
+    // If we are in polling mode (no live WebSocket), fetch immediately so
+    // the sender sees their own message without waiting for the next poll.
+    if (_chatPollHandle !== null) {
+      await _fetchChatOnce();
+    }
   } catch(e) {
     console.error('[FUTA] Chat send error:', e.code, e.message);
     showToast('Failed to send message.', 'error');
@@ -1931,7 +1990,7 @@ let _studentsUnsubscribe = null;
 async function loadStudentsList() {
   const el = document.getElementById('students-list-content');
   if (!el || !_db || !_currentUser) return;
-  el.innerHTML = `<div style="display:flex;justify-content:center;padding:2rem"><div class="spinner"></div></div>`;
+  el.innerHTML = '<div style="display:flex;justify-content:center;padding:2rem"><div class="spinner"></div></div>';
 
   // Clean up any previous listener
   if (_studentsUnsubscribe) { _studentsUnsubscribe(); _studentsUnsubscribe = null; }
@@ -1939,62 +1998,83 @@ async function loadStudentsList() {
   // Follows — read silently, never block student loading if it fails
   let following = [];
   try {
-    const followSnap = await _fb.get(_fb.ref(_db, `follows/${_currentUser.uid}`));
+    const followSnap = await _fb.get(_fb.ref(_db, 'follows/' + _currentUser.uid));
     following = followSnap.exists() ? Object.keys(followSnap.val()) : [];
   } catch(e) {
     console.warn('[FUTA] follows read skipped (rules may need updating):', e.code);
     following = [];
   }
 
-  // Attach real-time listener — students show regardless of follows permission
+  function _renderStudents(usersSnap) {
+    const container = document.getElementById('students-list-content');
+    if (!container) return;
+
+    if (!usersSnap.exists()) {
+      container.innerHTML = '<p style="color:var(--text-dim);padding:1rem">No students registered yet.</p>';
+      return;
+    }
+
+    const users = Object.entries(usersSnap.val())
+      .map(([uid, u]) => ({ uid, ...u }))
+      .filter(u => u.uid !== _currentUser.uid && u.name)
+      .sort((a, b) => (a.name || '').localeCompare(b.name || ''));
+
+    if (users.length === 0) {
+      container.innerHTML = '<p style="color:var(--text-dim);padding:1rem">No other students found.</p>';
+      return;
+    }
+
+    container.innerHTML =
+      '<div style="margin-bottom:1rem">' +
+        '<input type="text" class="form-input" placeholder="Search students…" oninput="filterStudents(this.value)" style="max-width:300px" />' +
+      '</div>' +
+      '<div class="students-grid" id="students-grid">' +
+        users.map(u => {
+          const isFollowing = following.includes(u.uid);
+          return '<div class="student-card" id="student-card-' + u.uid + '">' +
+            '<div class="student-card-avatar">' + avatarHtml(u.name, u.photoURL || '', 48) + '</div>' +
+            '<div class="student-card-name">' + escapeHtml(u.name || 'Unknown') + '</div>' +
+            '<div class="student-card-meta">' + escapeHtml(u.level || '') + (u.level && u.matric ? ' · ' : '') + escapeHtml(u.matric || '') + '</div>' +
+            '<button class="btn-follow ' + (isFollowing ? 'following' : '') + '" onclick="toggleFollow(\'' + u.uid + '\', this)">' +
+            (isFollowing ? '✓ Following' : '+ Follow') +
+            '</button></div>';
+        }).join('') +
+      '</div>';
+  }
+
+  // Try onValue first; fall back to one-shot get() on error
+  let wsWorking = false;
+  let wsTimedOut = false;
+
+  const wsTimeout = setTimeout(() => {
+    if (!wsWorking) {
+      wsTimedOut = true;
+      console.warn('[FUTA] Students onValue timed out — switching to get()');
+      if (_studentsUnsubscribe) { _studentsUnsubscribe(); _studentsUnsubscribe = null; }
+      _fb.get(_fb.ref(_db, 'users')).then(_renderStudents).catch(err => {
+        const container = document.getElementById('students-list-content');
+        if (container) container.innerHTML = '<p style="color:var(--text-dim);padding:1rem">Could not load students (' + (err.code || 'network error') + ').</p>';
+      });
+    }
+  }, 5000);
+
   _studentsUnsubscribe = _fb.onValue(
     _fb.ref(_db, 'users'),
     usersSnap => {
-      const container = document.getElementById('students-list-content');
-      if (!container) return;
-
-      if (!usersSnap.exists()) {
-        container.innerHTML = `<p style="color:var(--text-dim);padding:1rem">No students registered yet.</p>`;
-        return;
-      }
-
-      const users = Object.entries(usersSnap.val())
-        .map(([uid, u]) => ({ uid, ...u }))
-        .filter(u => u.uid !== _currentUser.uid && u.name)
-        .sort((a, b) => (a.name || '').localeCompare(b.name || ''));
-
-      if (users.length === 0) {
-        container.innerHTML = `<p style="color:var(--text-dim);padding:1rem">No other students found.</p>`;
-        return;
-      }
-
-      container.innerHTML = `
-        <div style="margin-bottom:1rem">
-          <input type="text" class="form-input" placeholder="Search students…"
-            oninput="filterStudents(this.value)" style="max-width:300px" />
-        </div>
-        <div class="students-grid" id="students-grid">
-          ${users.map(u => {
-            const isFollowing = following.includes(u.uid);
-            return `
-              <div class="student-card" id="student-card-${u.uid}">
-                <div class="student-card-avatar">${avatarHtml(u.name, u.photoURL || '', 48)}</div>
-                <div class="student-card-name">${escapeHtml(u.name || 'Unknown')}</div>
-                <div class="student-card-meta">${escapeHtml(u.level || '')}${u.level && u.matric ? ' · ' : ''}${escapeHtml(u.matric || '')}</div>
-                <button class="btn-follow ${isFollowing ? 'following' : ''}"
-                  onclick="toggleFollow('${u.uid}', this)">
-                  ${isFollowing ? '✓ Following' : '+ Follow'}
-                </button>
-              </div>`;
-          }).join('')}
-        </div>`;
+      if (wsTimedOut) return;
+      wsWorking = true;
+      clearTimeout(wsTimeout);
+      _renderStudents(usersSnap);
     },
     err => {
-      console.error('[FUTA] Students onValue error:', err.code, err.message);
-      const container = document.getElementById('students-list-content');
-      if (container) container.innerHTML = `<p style="color:var(--text-dim);padding:1rem">
-        Could not load students (${err.code || 'error'}). Check Firebase rules for users/.
-      </p>`;
+      clearTimeout(wsTimeout);
+      wsTimedOut = true;
+      console.warn('[FUTA] Students onValue error — switching to get():', err.code, err.message);
+      if (_studentsUnsubscribe) { _studentsUnsubscribe(); _studentsUnsubscribe = null; }
+      _fb.get(_fb.ref(_db, 'users')).then(_renderStudents).catch(e2 => {
+        const container = document.getElementById('students-list-content');
+        if (container) container.innerHTML = '<p style="color:var(--text-dim);padding:1rem">Could not load students (' + (e2.code || 'error') + ').</p>';
+      });
     }
   );
 
