@@ -1336,7 +1336,7 @@ window.doLogout = async function() {
   if (!_auth) return;
   // Clean up all live listeners before signing out
   if (_chatUnsubscribe) { _chatUnsubscribe(); _chatUnsubscribe = null; }
-  _stopChatPolling();
+  _stopChatListener();
   if (_studentsUnsubscribe) { _studentsUnsubscribe(); _studentsUnsubscribe = null; }
   // Reset auth flag so community page re-renders fresh on next login
   _authResolved = false;
@@ -1722,7 +1722,7 @@ function renderCommunity() {
 
   // Always tear down any old listener before rebuilding DOM
   if (_chatUnsubscribe) { _chatUnsubscribe(); _chatUnsubscribe = null; }
-  _stopChatPolling();
+  _stopChatListener();
   if (_studentsUnsubscribe) { _studentsUnsubscribe(); _studentsUnsubscribe = null; }
 
   // Build the community UI fresh
@@ -1775,139 +1775,143 @@ window.switchCommunityTab = function(tab) {
 };
 
 // ── Chat ─────────────────────────────────────────────────────
-// ── Chat polling interval handle ──────────────────────────────
-let _chatPollHandle = null;
+// ============================================================
+//  CHAT — Firebase RTDB REST API (pure HTTPS, no WebSocket)
+//
+//  Reads:  GET  {dbURL}/community/chat.json?auth=TOKEN&limitToLast=60
+//  Writes: POST {dbURL}/community/chat.json?auth=TOKEN
+//
+//  This uses the exact same data already in your RTDB under
+//  community/chat — no migration, no new service, no billing.
+//  Works on any network because it is plain HTTPS, not WebSocket.
+// ============================================================
 
-function _renderChatMessages(snap) {
-  const el = document.getElementById('chat-messages');
-  if (!el) return;
-
-  if (!snap.exists()) {
-    el.innerHTML = '<p style="text-align:center;color:var(--text-dim);padding:2rem;font-size:.85rem">No messages yet. Say hello! 👋</p>';
-    return;
-  }
-
-  const msgs = [];
-  snap.forEach(child => msgs.push({ key: child.key, ...child.val() }));
-  msgs.sort((a, b) => (a.createdAt || 0) - (b.createdAt || 0));
-
-  const atBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 80;
-
-  el.innerHTML = msgs.map(msg => {
-    const isMe = msg.uid === _currentUser.uid;
-    const time = msg.createdAt
-      ? new Date(msg.createdAt).toLocaleTimeString('en-GB', {hour:'2-digit', minute:'2-digit'})
-      : '';
-    return '<div class="chat-msg ' + (isMe ? 'chat-msg-me' : '') + '">' +
-      '<div class="chat-msg-inner">' +
-      (!isMe ? '<div class="chat-msg-avatar">' + avatarHtml(msg.name || '?', msg.photoURL || '', 30) + '</div>' : '') +
-      '<div class="chat-msg-body">' +
-      (!isMe ? '<div class="chat-msg-sender">' + escapeHtml(msg.name || 'Student') + '</div>' : '') +
-      '<div class="chat-msg-text">' + escapeHtml(msg.text || '') + '</div>' +
-      '<div class="chat-msg-time">' + time + '</div>' +
-      '</div></div></div>';
-  }).join('');
-
-  if (atBottom) el.scrollTop = el.scrollHeight;
-}
-
-async function _fetchChatOnce() {
-  if (!_db || !window._fb || !_currentUser) return;
-  if (!document.getElementById('chat-messages')) {
-    _stopChatPolling();
-    return;
-  }
-  try {
-    const chatRef = _fb.ref(_db, 'community/chat');
-    const chatQ   = _fb.query(chatRef, _fb.limitToLast(60));
-    const snap    = await _fb.get(chatQ);
-    _renderChatMessages(snap);
-  } catch (err) {
-    console.error('[FUTA] Chat fetch error:', err.code || err.message);
-    const el = document.getElementById('chat-messages');
-    if (el && el.querySelector && el.querySelector('.spinner')) {
-      el.innerHTML = '<p style="text-align:center;color:var(--text-dim);padding:2rem;font-size:.85rem">Could not load chat (' + (err.code || 'network error') + '). Retrying…</p>';
-    }
-  }
-}
+let _chatPollHandle = null;   // setInterval handle for polling
 
 function _stopChatPolling() {
   if (_chatPollHandle) { clearInterval(_chatPollHandle); _chatPollHandle = null; }
 }
 
-function loadChat() {
-  if (!_db || !window._fb || !_currentUser) {
-    console.error('[FUTA] loadChat: missing db/fb/user', !!_db, !!window._fb, !!_currentUser);
-    return;
-  }
-  const messagesEl = document.getElementById('chat-messages');
-  if (!messagesEl) {
-    console.error('[FUTA] loadChat: #chat-messages not found in DOM');
-    return;
-  }
+// Alias so renderCommunity / doLogout can call _stopChatListener()
+// without knowing which implementation is active
+function _stopChatListener() { _stopChatPolling(); }
 
-  // Tear down any previous listener / poll
-  if (_chatUnsubscribe) { _chatUnsubscribe(); _chatUnsubscribe = null; }
-  _stopChatPolling();
-
-  // Try onValue (WebSocket) first; if it errors or times out, fall back to HTTPS polling
-  const chatRef = _fb.ref(_db, 'community/chat');
-  const chatQ   = _fb.query(chatRef, _fb.limitToLast(60));
-
-  let wsWorking  = false;
-  let wsTimedOut = false;
-
-  // If WebSocket doesn't deliver within 5 s, switch to polling
-  const wsTimeout = setTimeout(() => {
-    if (!wsWorking) {
-      wsTimedOut = true;
-      console.warn('[FUTA] onValue timed out — switching to HTTPS polling');
-      if (_chatUnsubscribe) { _chatUnsubscribe(); _chatUnsubscribe = null; }
-      _fetchChatOnce();
-      _chatPollHandle = setInterval(_fetchChatOnce, 8000);
-    }
-  }, 5000);
-
-  _chatUnsubscribe = _fb.onValue(
-    chatQ,
-    snap => {
-      if (wsTimedOut) return;
-      wsWorking = true;
-      clearTimeout(wsTimeout);
-      _renderChatMessages(snap);
-    },
-    err => {
-      clearTimeout(wsTimeout);
-      wsTimedOut = true;
-      console.warn('[FUTA] onValue error — switching to HTTPS polling:', err.code, err.message);
-      if (_chatUnsubscribe) { _chatUnsubscribe(); _chatUnsubscribe = null; }
-      _fetchChatOnce();
-      _chatPollHandle = setInterval(_fetchChatOnce, 8000);
-    }
-  );
+// ── Build RTDB REST base URL ──────────────────────────────────
+function _rtdbChatUrl() {
+  return (window.FIREBASE_CONFIG.databaseURL || '').replace(/\/$/, '')
+    + '/community/chat.json';
 }
 
+// ── Render messages array into #chat-messages ─────────────────
+function _renderChatMessages(msgs) {
+  const el = document.getElementById('chat-messages');
+  if (!el) return;
+  if (!msgs.length) {
+    el.innerHTML = '<p style="text-align:center;color:var(--text-dim);'
+      + 'padding:2rem;font-size:.85rem">No messages yet. Say hello! 👋</p>';
+    return;
+  }
+  const atBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 80;
+  el.innerHTML = msgs.map(msg => {
+    const isMe = msg.uid === _currentUser.uid;
+    const time = msg.createdAt
+      ? new Date(msg.createdAt).toLocaleTimeString('en-GB', {hour:'2-digit', minute:'2-digit'})
+      : '';
+    return '<div class="chat-msg ' + (isMe ? 'chat-msg-me' : '') + '">'
+      + '<div class="chat-msg-inner">'
+      + (!isMe ? '<div class="chat-msg-avatar">' + avatarHtml(msg.name || '?', msg.photoURL || '', 30) + '</div>' : '')
+      + '<div class="chat-msg-body">'
+      + (!isMe ? '<div class="chat-msg-sender">' + escapeHtml(msg.name || 'Student') + '</div>' : '')
+      + '<div class="chat-msg-text">'   + escapeHtml(msg.text || '') + '</div>'
+      + '<div class="chat-msg-time">'   + time + '</div>'
+      + '</div></div></div>';
+  }).join('');
+  if (atBottom) el.scrollTop = el.scrollHeight;
+}
+
+// ── Fetch last 60 messages via RTDB REST ──────────────────────
+async function _fetchChatOnce() {
+  if (!_currentUser) return;
+  if (!document.getElementById('chat-messages')) { _stopChatPolling(); return; }
+  try {
+    const token = await _currentUser.getIdToken();
+    const url   = _rtdbChatUrl()
+      + '?auth=' + encodeURIComponent(token)
+      + '&orderBy=%22createdAt%22&limitToLast=60';
+    const res  = await fetch(url);
+    if (res.status === 401 || res.status === 403) {
+      // Token may have just expired — refresh once and retry
+      const fresh = await _currentUser.getIdToken(true);
+      const res2  = await fetch(_rtdbChatUrl()
+        + '?auth=' + encodeURIComponent(fresh)
+        + '&orderBy=%22createdAt%22&limitToLast=60');
+      if (!res2.ok) throw new Error('HTTP ' + res2.status);
+      return _processRtdbSnap(await res2.json());
+    }
+    if (!res.ok) throw new Error('HTTP ' + res.status);
+    _processRtdbSnap(await res.json());
+  } catch (err) {
+    console.error('[FUTA] _fetchChatOnce:', err.message);
+    const el = document.getElementById('chat-messages');
+    // Only show the error if no messages have been rendered yet
+    if (el && el.querySelector('.spinner')) {
+      el.innerHTML = '<p style="text-align:center;color:var(--text-dim);'
+        + 'padding:2rem;font-size:.85rem">Chat error: ' + escapeHtml(err.message)
+        + '. <a href="#" onclick="loadChat();return false">Retry</a></p>';
+    }
+  }
+}
+
+function _processRtdbSnap(data) {
+  const msgs = [];
+  if (data && typeof data === 'object') {
+    Object.keys(data).forEach(k => {
+      const v = data[k];
+      if (v && v.text) msgs.push({ key: k, ...v });
+    });
+    msgs.sort((a, b) => (a.createdAt || 0) - (b.createdAt || 0));
+  }
+  _renderChatMessages(msgs);
+}
+
+// ── Start polling (called by loadChat and on send) ────────────
+function loadChat() {
+  if (!_currentUser) return;
+  if (!document.getElementById('chat-messages')) return;
+  _stopChatPolling();
+  // Fetch immediately, then every 6 seconds
+  _fetchChatOnce();
+  _chatPollHandle = setInterval(_fetchChatOnce, 6000);
+}
+
+// ── Send a message via RTDB REST ─────────────────────────────
 window.sendChatMessage = async function() {
   const inp = document.getElementById('chat-input');
-  if (!inp || !inp.value.trim() || !_db || !_currentUser) return;
+  if (!inp || !inp.value.trim() || !_currentUser) return;
   const text = inp.value.trim();
-  inp.value = '';
+  inp.value  = '';
   try {
-    await _fb.push(_fb.ref(_db, 'community/chat'), {
-      uid:      _currentUser.uid,
-      name:     _userProfile ? _userProfile.name : 'Student',
-      photoURL: _userProfile ? (_userProfile.photoURL || '') : '',
-      text,
-      createdAt: Date.now(),
+    const token = await _currentUser.getIdToken();
+    const res   = await fetch(_rtdbChatUrl() + '?auth=' + encodeURIComponent(token), {
+      method:  'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body:    JSON.stringify({
+        uid:       _currentUser.uid,
+        name:      _userProfile ? (_userProfile.name  || 'Student') : 'Student',
+        photoURL:  _userProfile ? (_userProfile.photoURL || '')      : '',
+        text,
+        createdAt: Date.now(),
+      }),
     });
-    // If we are in polling mode (no live WebSocket), fetch immediately so
-    // the sender sees their own message without waiting for the next poll.
-    if (_chatPollHandle !== null) {
-      await _fetchChatOnce();
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error((err.error) || 'HTTP ' + res.status);
     }
+    // Refresh immediately so the sender sees their own message
+    await _fetchChatOnce();
   } catch(e) {
-    console.error('[FUTA] Chat send error:', e.code, e.message);
-    showToast('Failed to send message.', 'error');
+    console.error('[FUTA] sendChatMessage:', e.message);
+    showToast('Failed to send: ' + e.message, 'error');
     inp.value = text;
   }
 };
