@@ -1786,6 +1786,12 @@ async function loadChat() {
   _chatUnsubscribe = _fb.onValue(
     chatQ,
     snap => {
+      // DIAGNOSTIC — remove after confirming chat works
+      console.log('[FUTA-CHAT] snap.exists():', snap.exists(), '| snap.size:', snap.size, '| key:', snap.key);
+      if (snap.exists()) {
+        snap.forEach(child => console.log('[FUTA-CHAT] child key:', child.key, 'val:', JSON.stringify(child.val()).slice(0,80)));
+      }
+
       if (!snap.exists()) {
         messagesEl.innerHTML = `<p style="text-align:center;color:var(--text-dim);padding:2rem;font-size:.85rem">No messages yet. Say hello! 👋</p>`;
         return;
@@ -1829,18 +1835,23 @@ async function loadChat() {
 
 window.sendChatMessage = async function() {
   const inp = document.getElementById('chat-input');
-  if (!inp || !inp.value.trim() || !_db || !_currentUser) return;
+  if (!inp || !inp.value.trim() || !_db || !_currentUser) {
+    console.log('[FUTA-CHAT] sendChatMessage blocked — inp:', !!inp, 'val:', inp?.value?.trim(), 'db:', !!_db, 'user:', !!_currentUser);
+    return;
+  }
   const text = inp.value.trim();
   inp.value = '';
   try {
-    await _fb.push(_fb.ref(_db, 'community/chat'), {
+    const ref = await _fb.push(_fb.ref(_db, 'community/chat'), {
       uid:      _currentUser.uid,
       name:     _userProfile ? _userProfile.name : 'Student',
       photoURL: _userProfile ? (_userProfile.photoURL || '') : '',
       text,
       createdAt: Date.now(),
     });
+    console.log('[FUTA-CHAT] Message sent OK, key:', ref.key);
   } catch(e) {
+    console.error('[FUTA-CHAT] Send failed:', e.code, e.message);
     showToast('Failed to send message.', 'error');
     inp.value = text;
   }
