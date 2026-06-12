@@ -97,20 +97,17 @@ async function initFirebase() {
           _userProfile = null;
         }
       } else {
-        _userProfile = null;
+        _userProfile  = null;
+        _authResolved = false;
       }
 
       _authResolved = true;
       renderNavAuth();
 
-      // If community page is active and not yet rendered, render it now
+      // Re-render community if it is the active page and needs updating
       const communityPage = document.getElementById('page-community');
       if (communityPage && communityPage.classList.contains('active')) {
-        const content = document.getElementById('community-content');
-        // Only re-render if it's showing a spinner or is empty
-        if (content && (!content.querySelector('.community-tabs'))) {
-          renderCommunity();
-        }
+        renderCommunity();
       }
     });
 
@@ -1337,6 +1334,14 @@ window.doLogin = async function() {
 
 window.doLogout = async function() {
   if (!_auth) return;
+  // Clean up all live listeners before signing out
+  if (_chatUnsubscribe) { _chatUnsubscribe(); _chatUnsubscribe = null; }
+  if (_studentsUnsubscribe) { _studentsUnsubscribe(); _studentsUnsubscribe = null; }
+  // Reset auth flag so community page re-renders fresh on next login
+  _authResolved = false;
+  // Clear community content so it doesn't show stale data
+  const communityContent = document.getElementById('community-content');
+  if (communityContent) communityContent.innerHTML = '';
   await _fb.signOut(_auth);
   _userProfile = null;
   closeUserDropdown();
@@ -1698,14 +1703,13 @@ function renderCommunity() {
   const content = document.getElementById('community-content');
   if (!content) return;
 
-  // If auth hasn't resolved yet, show spinner and wait for
-  // onAuthStateChanged to call us again once it's ready
+  // Auth not resolved yet — show spinner, onAuthStateChanged will call us again
   if (!_authResolved) {
     content.innerHTML = `<div style="display:flex;justify-content:center;padding:3rem"><div class="spinner"></div></div>`;
     return;
   }
 
-  // Auth resolved — check login
+  // Not logged in
   if (!_currentUser) {
     content.innerHTML = `
       <div class="empty-state" style="padding-top:3rem">
@@ -1715,13 +1719,11 @@ function renderCommunity() {
     return;
   }
 
-  // Already fully rendered — don't rebuild the DOM, just make sure chat is loaded
-  if (content.querySelector('.community-tabs')) {
-    if (!_chatUnsubscribe) loadChat();
-    return;
-  }
+  // Always tear down any old listener before rebuilding DOM
+  if (_chatUnsubscribe) { _chatUnsubscribe(); _chatUnsubscribe = null; }
+  if (_studentsUnsubscribe) { _studentsUnsubscribe(); _studentsUnsubscribe = null; }
 
-  // Build the community UI
+  // Build the community UI fresh
   content.innerHTML = `
     <div class="community-layout" style="padding-top:1.5rem">
       <div class="community-tabs">
@@ -1744,15 +1746,11 @@ function renderCommunity() {
       </div>
 
       <div id="community-feed" class="community-panel" style="display:none">
-        <div id="activity-feed-content">
-          <div style="display:flex;justify-content:center;padding:2rem"><div class="spinner"></div></div>
-        </div>
+        <div id="activity-feed-content"></div>
       </div>
 
       <div id="community-students" class="community-panel" style="display:none">
-        <div id="students-list-content">
-          <div style="display:flex;justify-content:center;padding:2rem"><div class="spinner"></div></div>
-        </div>
+        <div id="students-list-content"></div>
       </div>
     </div>`;
 
@@ -1775,38 +1773,43 @@ window.switchCommunityTab = function(tab) {
 };
 
 // ── Chat ─────────────────────────────────────────────────────
-async function loadChat() {
-  if (!_db || !window._fb || !_currentUser) return;
+function loadChat() {
+  if (!_db || !window._fb || !_currentUser) {
+    console.error('[FUTA] loadChat: missing db/fb/user', !!_db, !!window._fb, !!_currentUser);
+    return;
+  }
   const messagesEl = document.getElementById('chat-messages');
-  if (!messagesEl) return;
+  if (!messagesEl) {
+    console.error('[FUTA] loadChat: #chat-messages not found in DOM');
+    return;
+  }
 
-  // Unsubscribe any previous listener
   if (_chatUnsubscribe) { _chatUnsubscribe(); _chatUnsubscribe = null; }
 
-  messagesEl.innerHTML = `<div style="display:flex;justify-content:center;padding:2rem"><div class="spinner"></div></div>`;
-
-  // Attach live listener for new messages
   const chatRef = _fb.ref(_db, 'community/chat');
   const chatQ   = _fb.query(chatRef, _fb.limitToLast(60));
 
-  const renderMessages = snap => {
-    const el = document.getElementById('chat-messages');
-    if (!el) return;
-    if (!snap.exists()) {
-      el.innerHTML = `<p style="text-align:center;color:var(--text-dim);padding:2rem;font-size:.85rem">No messages yet. Say hello! 👋</p>`;
-      return;
-    }
-    const msgs = [];
-    snap.forEach(child => msgs.push({ key: child.key, ...child.val() }));
-    msgs.sort((a, b) => (a.createdAt || 0) - (b.createdAt || 0));
+  _chatUnsubscribe = _fb.onValue(
+    chatQ,
+    snap => {
+      const el = document.getElementById('chat-messages');
+      if (!el) return;
 
-    el.innerHTML = msgs.map(msg => {
-      const isMe = msg.uid === (_currentUser && _currentUser.uid);
-      const time = msg.createdAt
-        ? new Date(msg.createdAt).toLocaleTimeString('en-GB', {hour:'2-digit', minute:'2-digit'})
-        : '';
-      return `
-        <div class="chat-msg ${isMe ? 'chat-msg-me' : ''}">
+      if (!snap.exists()) {
+        el.innerHTML = `<p style="text-align:center;color:var(--text-dim);padding:2rem;font-size:.85rem">No messages yet. Say hello! 👋</p>`;
+        return;
+      }
+
+      const msgs = [];
+      snap.forEach(child => msgs.push({ key: child.key, ...child.val() }));
+      msgs.sort((a, b) => (a.createdAt || 0) - (b.createdAt || 0));
+
+      el.innerHTML = msgs.map(msg => {
+        const isMe = msg.uid === _currentUser.uid;
+        const time = msg.createdAt
+          ? new Date(msg.createdAt).toLocaleTimeString('en-GB', {hour:'2-digit', minute:'2-digit'})
+          : '';
+        return `<div class="chat-msg ${isMe ? 'chat-msg-me' : ''}">
           <div class="chat-msg-inner">
             ${!isMe ? `<div class="chat-msg-avatar">${avatarHtml(msg.name || '?', msg.photoURL || '', 30)}</div>` : ''}
             <div class="chat-msg-body">
@@ -1816,29 +1819,18 @@ async function loadChat() {
             </div>
           </div>
         </div>`;
-    }).join('');
+      }).join('');
 
-    el.scrollTop = el.scrollHeight;
-  };
-
-  _chatUnsubscribe = _fb.onValue(chatQ, renderMessages, err => {
-    console.error('[FUTA] Chat onValue error:', err.code, err.message);
-    const el = document.getElementById('chat-messages');
-    if (el) el.innerHTML = `<p style="text-align:center;color:var(--text-dim);padding:2rem;font-size:.85rem">
-      Chat error: ${err.code || err.message}. Check Firebase rules for community/chat.
-    </p>`;
-  });
-
-  // Also do a one-time get() to force immediate render of existing messages
-  // (onValue may not fire again if data hasn't changed since last attach)
-  try {
-    const snap = await _fb.get(chatQ);
-    renderMessages(snap);
-  } catch(e) { /* ignore — live listener will handle it */ }
-
-  window._cleanupChat = () => {
-    if (_chatUnsubscribe) { _chatUnsubscribe(); _chatUnsubscribe = null; }
-  };
+      el.scrollTop = el.scrollHeight;
+    },
+    err => {
+      console.error('[FUTA] Chat error:', err.code, err.message);
+      const el = document.getElementById('chat-messages');
+      if (el) el.innerHTML = `<p style="text-align:center;color:var(--text-dim);padding:2rem;font-size:.85rem">
+        Chat error: ${err.code}. Please refresh.
+      </p>`;
+    }
+  );
 }
 
 window.sendChatMessage = async function() {
