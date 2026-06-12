@@ -1769,25 +1769,17 @@ window.switchCommunityTab = function(tab) {
 
 // ── Chat ─────────────────────────────────────────────────────
 async function loadChat() {
-  if (!_db || !window._fb) return;
+  if (!_db || !window._fb || !_currentUser) return;
   const messagesEl = document.getElementById('chat-messages');
   if (!messagesEl) return;
 
   // Unsubscribe any previous listener
   if (_chatUnsubscribe) { _chatUnsubscribe(); _chatUnsubscribe = null; }
 
-  // Pre-check permissions before attaching live listener
-  try {
-    await _fb.get(_fb.ref(_db, 'community/chat'));
-  } catch(permErr) {
-    messagesEl.innerHTML = `<p style="text-align:center;color:var(--text-dim);padding:2rem;font-size:.85rem">
-      Chat permission denied (${permErr.code || 'error'}). Please sign out and sign back in.
-    </p>`;
-    console.error('[FUTA] Chat permission error:', permErr);
-    return;
-  }
+  messagesEl.innerHTML = `<div style="display:flex;justify-content:center;padding:2rem"><div class="spinner"></div></div>`;
 
-  // Read last 60 messages — no orderByChild needed, sort client-side
+  // Attach listener directly — no pre-check get() needed
+  // Permission errors surface in the onValue error callback below
   const chatRef = _fb.ref(_db, 'community/chat');
   const chatQ   = _fb.query(chatRef, _fb.limitToLast(60));
 
@@ -1823,10 +1815,9 @@ async function loadChat() {
       messagesEl.scrollTop = messagesEl.scrollHeight;
     },
     err => {
-      // Firebase permission/network errors land here, not in try/catch
       console.error('[FUTA] Chat onValue error:', err.code, err.message);
       messagesEl.innerHTML = `<p style="text-align:center;color:var(--text-dim);padding:2rem;font-size:.85rem">
-        Chat error: ${err.code || err.message || 'unknown'}. Please sign out and sign back in.
+        Chat error: ${err.code || err.message}. Check Firebase rules for community/chat.
       </p>`;
     }
   );
@@ -1938,31 +1929,17 @@ async function loadStudentsList() {
   // Clean up any previous listener
   if (_studentsUnsubscribe) { _studentsUnsubscribe(); _studentsUnsubscribe = null; }
 
-  // Pre-check: test read permission before attaching live listener
-  try {
-    await _fb.get(_fb.ref(_db, 'users/' + _currentUser.uid));
-  } catch(permErr) {
-    el.innerHTML = `<p style="color:var(--text-dim);padding:1rem">Permission denied reading students. Make sure you are logged in and try again.</p>`;
-    console.error('[FUTA] Students permission error:', permErr);
-    return;
-  }
-
-  // Follows — try root path first (matches actual DB), fall back to community/follows
+  // Follows — read silently, never block student loading if it fails
   let following = [];
   try {
-    let followSnap = await _fb.get(_fb.ref(_db, `follows/${_currentUser.uid}`));
-    if (!followSnap.exists()) {
-      // Try community/follows in case data is stored there
-      followSnap = await _fb.get(_fb.ref(_db, `community/follows/${_currentUser.uid}`));
-    }
+    const followSnap = await _fb.get(_fb.ref(_db, `follows/${_currentUser.uid}`));
     following = followSnap.exists() ? Object.keys(followSnap.val()) : [];
   } catch(e) {
-    // follows read failed — continue without follow data rather than crashing
-    console.warn('[FUTA] Could not read follows:', e);
+    console.warn('[FUTA] follows read skipped (rules may need updating):', e.code);
     following = [];
   }
 
-  // Attach real-time listener so newly registered students appear immediately
+  // Attach real-time listener — students show regardless of follows permission
   _studentsUnsubscribe = _fb.onValue(
     _fb.ref(_db, 'users'),
     usersSnap => {
@@ -1976,7 +1953,7 @@ async function loadStudentsList() {
 
       const users = Object.entries(usersSnap.val())
         .map(([uid, u]) => ({ uid, ...u }))
-        .filter(u => u.uid !== _currentUser.uid && u.name) // skip entries with no name
+        .filter(u => u.uid !== _currentUser.uid && u.name)
         .sort((a, b) => (a.name || '').localeCompare(b.name || ''));
 
       if (users.length === 0) {
@@ -2006,14 +1983,11 @@ async function loadStudentsList() {
         </div>`;
     },
     err => {
-      // onValue error callback — this is where Firebase permission errors land
       console.error('[FUTA] Students onValue error:', err.code, err.message);
       const container = document.getElementById('students-list-content');
-      if (container) {
-        container.innerHTML = `<p style="color:var(--text-dim);padding:1rem">
-          Could not load students (${err.code || 'error'}). Please sign out and sign back in.
-        </p>`;
-      }
+      if (container) container.innerHTML = `<p style="color:var(--text-dim);padding:1rem">
+        Could not load students (${err.code || 'error'}). Check Firebase rules for users/.
+      </p>`;
     }
   );
 
