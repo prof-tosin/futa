@@ -3,8 +3,8 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>FUTA Online Class — Study Portal</title>
-  <meta name="description" content="CBT practice portal for Federal University of Technology Akure students. Study notes, past questions and timed tests." />
+  <title>SmarTosh — FUTA Online Class</title>
+  <meta name="description" content="SmarTosh — Free CBT practice portal for FUTA students. Study notes, past questions and timed tests." />
 
   <!-- Fonts -->
   <link rel="preconnect" href="https://fonts.googleapis.com" />
@@ -14,6 +14,8 @@
   <!-- Icons -->
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css" />
 
+  <link rel="icon" type="image/png" href="favicon.png" />
+  <link rel="apple-touch-icon" href="favicon.png" />
   <link rel="stylesheet" href="style.css" />
 </head>
 <body>
@@ -22,8 +24,8 @@
      NAVIGATION
 ═══════════════════════════════════════════════════════════ -->
 <nav>
-  <div class="nav-crest">FC</div>
-  <div class="nav-logo">FUTA <span>Online Class</span></div>
+  <div class="nav-crest"><img src="favicon.png" alt="SmarTosh" style="width:28px;height:28px;border-radius:6px;object-fit:cover;" onerror="this.style.display='none';this.parentElement.textContent='ST'" /></div>
+  <div class="nav-logo">Smar<span>Tosh</span></div>
   <div class="nav-divider"></div>
   <div class="nav-breadcrumb" id="breadcrumb">
     <span>Home</span>
@@ -133,9 +135,9 @@
   </div>
 
   <footer class="site-footer">
-    <div class="footer-logo">FUTA <span>Online Class</span></div>
+    <div class="footer-logo">Smar<span>Tosh</span></div>
     <div class="footer-rule"></div>
-    <div class="footer-tagline">Built for FUTA students, by a FUTA student.</div>
+    <div class="footer-tagline">SmarTosh — Built for FUTA students, by a FUTA student.</div>
     <div>© <span id="footer-year"></span> futaoc.name.ng · All rights reserved</div>
   </footer>
 </div>
@@ -466,20 +468,7 @@
 
     <!-- ── REGISTER FORM ── -->
     <div id="auth-register-form" class="auth-form" style="display:none">
-      <!-- Profile photo upload -->
-      <div class="form-group">
-        <label class="form-label">Profile Photo <span style="color:var(--text-dim);font-size:.78rem">(optional)</span></label>
-        <div class="photo-upload-wrap">
-          <div class="photo-preview" id="photo-preview">
-            <i class="fa-solid fa-user" style="font-size:1.5rem;color:var(--text-dim)"></i>
-          </div>
-          <label class="photo-upload-btn">
-            <i class="fa-solid fa-camera"></i> Choose Photo
-            <input type="file" id="reg-photo" accept="image/*" style="display:none"
-              onchange="previewRegPhoto(this)" />
-          </label>
-        </div>
-      </div>
+
       <div class="form-group">
         <label class="form-label" for="reg-name">Full name</label>
         <input class="form-input" type="text" id="reg-name"
@@ -489,6 +478,11 @@
         <label class="form-label" for="reg-matric">Matric number</label>
         <input class="form-input" type="text" id="reg-matric"
           placeholder="e.g. FUTAmm/20/1234" autocomplete="off" />
+      </div>
+      <div class="form-group">
+        <label class="form-label" for="reg-dept">Department</label>
+        <input class="form-input" type="text" id="reg-dept"
+          placeholder="e.g. Project Management Technology" autocomplete="off" />
       </div>
       <div class="form-group">
         <label class="form-label" for="reg-level">Academic level</label>
@@ -565,7 +559,7 @@
     </button>
     <div class="modal-header">
       <div class="modal-title">❤️ Support Us</div>
-      <div class="modal-subtitle">Help keep FUTA Online Class free for everyone</div>
+      <div class="modal-subtitle">Help keep SmarTosh free for everyone</div>
     </div>
     <div class="modal-body">
       <div class="support-card">
@@ -650,18 +644,6 @@
 <script src="app.js"></script>
 
 <script>
-  // Profile photo preview on registration
-  window.previewRegPhoto = function(input) {
-    const preview = document.getElementById('photo-preview');
-    if (!preview || !input.files || !input.files[0]) return;
-    const reader = new FileReader();
-    reader.onload = e => {
-      preview.innerHTML = `<img src="${e.target.result}" alt="Preview"
-        style="width:100%;height:100%;object-fit:cover;border-radius:50%" />`;
-    };
-    reader.readAsDataURL(input.files[0]);
-  };
-
   // FAB menu toggle
   window.toggleFabMenu = function() {
     const menu = document.getElementById('fab-menu');
